@@ -1,3 +1,5 @@
+extern crate core;
+
 pub mod renderer;
 
 use winit::event_loop::EventLoop;
