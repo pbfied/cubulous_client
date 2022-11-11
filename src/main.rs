@@ -1,9 +1,5 @@
 pub mod renderer;
 
-use std::fs::File;
-use std::path::{Path, PathBuf};
-use std::io::Read;
-
 use winit::event_loop::EventLoop;
 
 use renderer::renderer::CubulousRenderer;
@@ -15,7 +11,7 @@ fn hello_triangle() {
 
     let renderer = CubulousRenderer::new(&event_loop);
 
-    CubulousRenderer::run_blocking(renderer.window_id(), event_loop);
+    renderer.run_blocking(event_loop);
 }
 
 fn main() {

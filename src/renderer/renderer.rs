@@ -5,11 +5,9 @@ use std::io::{Read, Seek, SeekFrom};
 use std::marker::PhantomData;
 use std::mem;
 use std::path::Path;
-use std::task::ready;
 
 use ash::{vk, Device, Entry, Instance};
 use ash::extensions::khr::{Surface, Swapchain};
-use ash::vk::{PhysicalDevice, PresentModeKHR, SurfaceFormatKHR, SurfaceKHR, PhysicalDeviceProperties, PhysicalDeviceFeatures, QueueFamilyProperties, SurfaceCapabilitiesKHR, SwapchainKHR, ImageView, ComponentMapping, Image, Queue, ShaderModuleCreateFlags, ShaderModule};
 use num::clamp;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds Vulkan functions
 // vk holds Vulkan structs with no methods along with Vulkan macros
@@ -19,7 +17,6 @@ use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds
 use winit::{
     dpi::LogicalSize,
     event::{Event, WindowEvent},
-    event_loop,
     event_loop::{ControlFlow, EventLoop},
     window::{Icon, Window, WindowBuilder, WindowId},
 };
@@ -28,34 +25,43 @@ pub struct CubulousRenderer {
     entry: Entry,
     window: Window,
     instance: Instance,
-    surface: SurfaceKHR,
+    surface: vk::SurfaceKHR,
     surface_loader: Surface,
     swap_loader: Swapchain,
-    swap_chain: SwapchainKHR,
+    swap_chain: vk::SwapchainKHR,
     surface_format: vk::Format,
     extent: vk::Extent2D,
-    physical_device: PhysicalDevice,
+    physical_device: vk::PhysicalDevice,
     logical_device: Device,
     family_index: u32,
-    surface_formats: Vec<SurfaceFormatKHR>,
-    present_modes: Vec<PresentModeKHR>,
-    logical_queue: Queue,
-    image_views: Vec<ImageView>,
-    shaders: Vec<ShaderModule> // In [Vert, Frag] order
+    surface_formats: Vec<vk::SurfaceFormatKHR>,
+    present_modes: Vec<vk::PresentModeKHR>,
+    logical_queue: vk::Queue,
+    image_views: Vec<vk::ImageView>,
+    shader_modules: Vec<vk::ShaderModule>, // In [Vert, Frag] order
+    pipeline_layout: vk::PipelineLayout,
+    render_pass: vk::RenderPass,
+    pipelines: Vec<vk::Pipeline>,
+    frame_buffers: Vec<vk::Framebuffer>,
+    command_pool: vk::CommandPool,
+    command_buffers: Vec<vk::CommandBuffer>,
+    image_available_sem: vk::Semaphore,
+    render_finished_sem: vk::Semaphore,
+    in_flight_fence: vk::Fence
 }
 
 impl CubulousRenderer {
     pub fn new(ev_loop: &EventLoop<()>) -> CubulousRenderer {
         struct PhysicalDependencies {
-            physical_device: PhysicalDevice,
+            physical_device: vk::PhysicalDevice,
             family_index: u32,
-            surface_formats: Vec<SurfaceFormatKHR>,
-            present_modes: Vec<PresentModeKHR>
+            surface_formats: Vec<vk::SurfaceFormatKHR>,
+            present_modes: Vec<vk::PresentModeKHR>
         }
 
         struct SwapDependencies {
             swap_loader: Swapchain,
-            swap_chain: SwapchainKHR,
+            swap_chain: vk::SwapchainKHR,
             surface_format: vk::Format,
             extent: vk::Extent2D
         }
@@ -227,7 +233,7 @@ impl CubulousRenderer {
         }
 
         fn required_physical_extensions_present(instance: &Instance,
-                                                physical_device: PhysicalDevice,
+                                                physical_device: vk::PhysicalDevice,
                                                 required_extensions: &Vec<CString>) -> bool {
             let dev_extensions: Vec<&str>;
             unsafe {
@@ -251,10 +257,10 @@ impl CubulousRenderer {
         fn vulkan_physical_setup(
             instance: &Instance,
             surface_loader: &Surface,
-            surface: SurfaceKHR,
+            surface: vk::SurfaceKHR,
             required_extensions: &Vec<CString>,
         ) -> Result<PhysicalDependencies, String> {
-            let physical_devices: Vec<PhysicalDevice>;
+            let physical_devices: Vec<vk::PhysicalDevice>;
             unsafe {
                 physical_devices = instance.enumerate_physical_devices().unwrap();
             }
@@ -269,13 +275,13 @@ impl CubulousRenderer {
             let mut queue_family_idx = 0;
             let mut dev_found = false;
             let mut dev_idx: usize = 0;
-            let mut present_modes: Vec<PresentModeKHR> = vec![];
-            let mut surface_formats: Vec<SurfaceFormatKHR> = vec![];
+            let mut present_modes: Vec<vk::PresentModeKHR> = vec![];
+            let mut surface_formats: Vec<vk::SurfaceFormatKHR> = vec![];
 
             // For each physical device
             for (p_idx, device) in physical_devices.iter().enumerate() {
-                let dev_properties: PhysicalDeviceProperties;
-                let dev_features: PhysicalDeviceFeatures;
+                let dev_properties: vk::PhysicalDeviceProperties;
+                let dev_features: vk::PhysicalDeviceFeatures;
                 unsafe {
                     dev_properties = instance.get_physical_device_properties(*device);
                     dev_features = instance.get_physical_device_features(*device);
@@ -297,7 +303,7 @@ impl CubulousRenderer {
                     !present_modes.is_empty() &&
                     !surface_formats.is_empty() &&
                     !present_modes.is_empty() {
-                    let queue_families: Vec<QueueFamilyProperties>;
+                    let queue_families: Vec<vk::QueueFamilyProperties>;
                     unsafe {
                         queue_families = instance
                             .get_physical_device_queue_family_properties(*device);
@@ -352,7 +358,7 @@ impl CubulousRenderer {
             }
         }
 
-        fn logical_device_init(instance: &Instance, physical_device: &PhysicalDevice, qf_index: u32,
+        fn logical_device_init(instance: &Instance, physical_device: &vk::PhysicalDevice, qf_index: u32,
                                required_extensions: &Vec<CString>) -> Device {
             let extensions_cvec: Vec<*const c_char> = required_extensions
                 .iter()
@@ -363,7 +369,7 @@ impl CubulousRenderer {
             let queue_create_info = vk::DeviceQueueCreateInfo::default()
                 .queue_family_index(qf_index)
                 .queue_priorities(&queue_priority);
-            let enabled_features: PhysicalDeviceFeatures;
+            let enabled_features: vk::PhysicalDeviceFeatures;
             unsafe {
                 enabled_features = instance.get_physical_device_features(*physical_device);
             }
@@ -380,7 +386,7 @@ impl CubulousRenderer {
             }
         }
 
-        fn choose_swap_extent(window: &Window, capabilities: &SurfaceCapabilitiesKHR) -> vk::Extent2D {
+        fn choose_swap_extent(window: &Window, capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
             if capabilities.current_extent.width != u32::MAX {
                 capabilities.current_extent
             }
@@ -402,9 +408,9 @@ impl CubulousRenderer {
             physical_dependencies: &PhysicalDependencies,
             window: &Window,
             surface_loader: &Surface,
-            surface: SurfaceKHR,
+            surface: vk::SurfaceKHR,
         ) -> SwapDependencies {
-            let capabilities: SurfaceCapabilitiesKHR;
+            let capabilities: vk::SurfaceCapabilitiesKHR;
             unsafe {
                 capabilities= surface_loader
                     .get_physical_device_surface_capabilities(physical_dependencies.physical_device,
@@ -428,10 +434,10 @@ impl CubulousRenderer {
                 match physical_dependencies
                     .present_modes
                     .iter()
-                    .find(|p|**p == PresentModeKHR::MAILBOX)
+                    .find(|p|**p == vk::PresentModeKHR::MAILBOX)
                 {
                     Some(x) => *x,
-                    None => PresentModeKHR::FIFO
+                    None => vk::PresentModeKHR::FIFO
                 };
 
             let swap_extent = choose_swap_extent(window, &capabilities);
@@ -441,7 +447,7 @@ impl CubulousRenderer {
                 image_count = capabilities.max_image_count
             }
 
-            let mut swap_create_info = vk::SwapchainCreateInfoKHR::default()
+            let swap_create_info = vk::SwapchainCreateInfoKHR::default()
                 .min_image_count(image_count)
                 .image_format(surface_format.format)
                 .image_color_space(surface_format.color_space)
@@ -465,7 +471,7 @@ impl CubulousRenderer {
                 .old_swapchain(vk::SwapchainKHR::null());
 
             let swap_chain_loader = Swapchain::new(instance, logical_device);
-            let swap_chain: SwapchainKHR;
+            let swap_chain: vk::SwapchainKHR;
             unsafe {
                 swap_chain = swap_chain_loader
                     .create_swapchain(&swap_create_info, None).unwrap();
@@ -479,20 +485,20 @@ impl CubulousRenderer {
             }
         }
 
-        fn vulkan_setup_image_views(device: &Device, swap_deps: &SwapDependencies) -> Vec<ImageView> {
-            let swap_chain_images: Vec<Image>;
+        fn vulkan_setup_image_views(device: &Device, swap_deps: &SwapDependencies) -> Vec<vk::ImageView> {
+            let swap_chain_images: Vec<vk::Image>;
             unsafe {
                 swap_chain_images = swap_deps.swap_loader
                     .get_swapchain_images(swap_deps.swap_chain).unwrap();
             }
 
-            let mut image_views: Vec<ImageView> = Vec::new();
+            let mut image_views: Vec<vk::ImageView> = Vec::new();
             for i in swap_chain_images {
                 let create_info = vk::ImageViewCreateInfo::default()
                     .image(i)
                     .view_type(vk::ImageViewType::TYPE_2D)
                     .format(swap_deps.surface_format)
-                    .components(ComponentMapping { // Allows remapping of color channels, I.E. turn all blues into shades of red
+                    .components(vk::ComponentMapping { // Allows remapping of color channels, I.E. turn all blues into shades of red
                         r: vk::ComponentSwizzle::IDENTITY,
                         g: vk::ComponentSwizzle::IDENTITY,
                         b: vk::ComponentSwizzle::IDENTITY,
@@ -531,13 +537,13 @@ impl CubulousRenderer {
         fn load_all_shaders(logical_device: &Device) -> Vec<vk::ShaderModule> {
             let shader_paths = ["shaders/spv/vert.spv", "shaders/spv/frag.spv"];
 
-            let mut shader_modules: Vec<ShaderModule> = Vec::with_capacity(shader_paths.len());
-            for (idx, sp) in shader_paths.iter().enumerate() {
+            let mut shader_modules: Vec<vk::ShaderModule> = Vec::with_capacity(shader_paths.len());
+            for sp in shader_paths.iter() {
                 let shader_spv = load_shader(sp).unwrap();
                 let shader_create_info = vk::ShaderModuleCreateInfo {
                     s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
                     p_next: std::ptr::null(),
-                    flags: ShaderModuleCreateFlags::default(),
+                    flags: vk::ShaderModuleCreateFlags::default(),
                     code_size: shader_spv.len(),
                     p_code: shader_spv.as_ptr().cast::<u32>(),
                     _marker: PhantomData
@@ -550,6 +556,209 @@ impl CubulousRenderer {
             shader_modules
         }
 
+        // Describes the color and depth buffers for each frame, and ???
+        fn setup_render_pass(logical_device: &Device, surface_format: vk::Format) -> vk::RenderPass {
+            let attachment_desc = vk::AttachmentDescription::default() // Color attachment
+                .format(surface_format) // Should match the format of swap chain images
+                .samples(vk::SampleCountFlags::TYPE_1)
+                .load_op(vk::AttachmentLoadOp::CLEAR) // What to do with pre existing data in the attachment before rendering
+                .store_op(vk::AttachmentStoreOp::STORE) // What to do with data in attachment after rendering
+                .stencil_load_op(vk::AttachmentLoadOp::DONT_CARE) // Not sure what stencil buffer is
+                .stencil_store_op(vk::AttachmentStoreOp::DONT_CARE)
+                .initial_layout(vk::ImageLayout::UNDEFINED) // image layout pre render
+                .final_layout(vk::ImageLayout::PRESENT_SRC_KHR); // Ready for presentation, not sure how that maps to a layout
+
+            let attachment_desc_array = [attachment_desc];
+
+            let attachment_ref = vk::AttachmentReference::default()
+                .attachment(0) // Index of attachment to reference
+                .layout(vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL); // Optimal layout for a color attachment
+
+            let attachment_ref_array = [attachment_ref];
+
+            let subpass = vk::SubpassDescription::default() // Each render pass consists of subpasses
+                .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS) // Future Vulkan may have compute subpasses
+                .color_attachments(&attachment_ref_array);
+
+            let subpass_array = [subpass];
+
+            let subpass_dependency = vk::SubpassDependency::default()
+                .src_subpass(vk::SUBPASS_EXTERNAL) // Refers to implicit subpass before the first sub pass
+                .dst_subpass(0)  // vk::SUBPASS_EXTERNAL here would refer to the implicit after the last sub pass
+                .src_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT) // Wait on the color attachment output stage (after color blending)
+                .src_access_mask(vk::AccessFlags::empty())
+                .dst_stage_mask(vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT)
+                .dst_access_mask(vk::AccessFlags::COLOR_ATTACHMENT_WRITE)
+                .dependency_flags(vk::DependencyFlags::empty());
+
+            let dependencies = [subpass_dependency];
+
+            let render_pass_create_info = vk::RenderPassCreateInfo::default()
+                .attachments(&attachment_desc_array)
+                .subpasses(&subpass_array)
+                .dependencies(&dependencies);
+
+            unsafe {logical_device.create_render_pass(&render_pass_create_info, None).unwrap() }
+        }
+
+        fn setup_pipeline_layout(logical_device: &Device) -> vk::PipelineLayout {
+            let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
+
+            unsafe {
+                logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap() }
+        }
+
+        fn setup_pipelines(logical_device: &Device,
+                           surface_format: vk::Format,
+                           shader_modules: &Vec<vk::ShaderModule>,
+                           pipeline_layout: vk::PipelineLayout,
+                           swap_extent: vk::Extent2D
+                            ) -> Vec<vk::Pipeline> {
+            fn setup_pipeline_stages(shader_modules: &Vec<vk::ShaderModule>) -> Vec<vk::PipelineShaderStageCreateInfo> {
+                // Reminder that shader modules are in [vert, frag] order
+                let create_bits = [vk::ShaderStageFlags::VERTEX,
+                    vk::ShaderStageFlags::FRAGMENT];
+                let mut create_info: Vec<vk::PipelineShaderStageCreateInfo> = Vec::with_capacity(
+                    shader_modules.len());
+                for (sm, flag) in shader_modules.iter()
+                    .zip(create_bits) {
+                    create_info.push(vk::PipelineShaderStageCreateInfo::default()
+                        .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
+                        .stage(flag)
+                        .module(*sm)
+                    );
+                }
+
+                create_info
+            }
+
+            let pipeline_stages = setup_pipeline_stages(shader_modules);
+
+            let vertex_inputs = vk::PipelineVertexInputStateCreateInfo::default();
+
+            let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
+                .topology(vk::PrimitiveTopology::TRIANGLE_LIST) // Triangle from every three vertices
+                .primitive_restart_enable(false); // ??
+
+            let viewport_state = vk::PipelineViewportStateCreateInfo::default()
+                .viewport_count(1)
+                .scissor_count(1);
+
+            let rasterization_state = vk::PipelineRasterizationStateCreateInfo::default()
+                .depth_clamp_enable(false) // Clamps (?) fragments beyond the far and near planes to said planes
+                .rasterizer_discard_enable(false) // Makes geometry not pass through the rasterizer
+                .polygon_mode(vk::PolygonMode::FILL) // Determines whether polygons are represented as points, lines or surfaces
+                .line_width(1.0) // Line thickness in units of fragment numbers (probably roughly equivalent to pixels?)
+                .cull_mode(vk::CullModeFlags::BACK) // Cull the back faces of geometry
+                .front_face(vk::FrontFace::CLOCKWISE) // Rules for determining if a face is front ??
+                .depth_bias_enable(false) // Parameters for transforming depth values
+                .depth_bias_constant_factor(0.0)
+                .depth_bias_clamp(0.0)
+                .depth_bias_slope_factor(0.0);
+
+            let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
+                .sample_shading_enable(false) // Disabled for now
+                .rasterization_samples(vk::SampleCountFlags::TYPE_1)
+                .min_sample_shading(1.0)
+                // .sample_mask() Leave NULL
+                .alpha_to_coverage_enable(false)
+                .alpha_to_one_enable(false);
+
+            let additive_color_blending_create_infos = [
+                vk::PipelineColorBlendAttachmentState::default()
+                    .color_write_mask(vk::ColorComponentFlags::RGBA)
+                    .blend_enable(true)
+                    .src_color_blend_factor(vk::BlendFactor::SRC_ALPHA)
+                    .dst_color_blend_factor(vk::BlendFactor::ONE_MINUS_SRC_ALPHA)
+                    .color_blend_op(vk::BlendOp::ADD) // Blend operation
+                    .src_alpha_blend_factor(vk::BlendFactor::ONE)
+                    .dst_alpha_blend_factor(vk::BlendFactor::ZERO)
+                    .alpha_blend_op(vk::BlendOp::ADD)
+            ];
+
+            let blend_constants: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+
+            let color_blending_create_info = vk::PipelineColorBlendStateCreateInfo::default()
+                .logic_op_enable(false) // Note that enabling this disables all of the attachment states effects
+                .logic_op(vk::LogicOp::COPY)
+                .attachments(&additive_color_blending_create_infos)
+                .blend_constants(blend_constants);
+
+            let dynamic_states = [vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR];
+
+            let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::default()
+                .dynamic_states(&dynamic_states);
+
+            let render_pass = setup_render_pass(logical_device, surface_format);
+
+            let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
+                .stages(&pipeline_stages)
+                .vertex_input_state(&vertex_inputs)
+                .input_assembly_state(&input_assembly)
+                .viewport_state(&viewport_state)
+                .rasterization_state(&rasterization_state)
+                .multisample_state(&multisample_state)
+                // .depth_stencil_state() Currently unused
+                .color_blend_state(&color_blending_create_info)
+                .dynamic_state(&dynamic_state_create_info)
+                .layout(pipeline_layout)
+                .render_pass(render_pass)
+                .subpass(0);
+
+            unsafe { logical_device.create_graphics_pipelines(vk::PipelineCache::null(),
+                                                              &[pipeline_info],
+                                                              None).unwrap() }
+        }
+
+        fn setup_frame_buffers(logical_device: &Device,
+                               image_views: &Vec<vk::ImageView>,
+                               render_pass: vk::RenderPass,
+                               swap_extent: vk::Extent2D) -> Vec<vk::Framebuffer> {
+            let mut frame_buffers: Vec<vk::Framebuffer> = Vec::with_capacity(image_views.len());
+            for v in image_views.iter() {
+                let image_slice = [*v];
+                let create_info = vk::FramebufferCreateInfo::default()
+                    .render_pass(render_pass)
+                    .attachments(&image_slice)
+                    .width(swap_extent.width)
+                    .height(swap_extent.height)
+                    .layers(1);
+
+                unsafe { frame_buffers.push(logical_device.create_framebuffer(&create_info, None).unwrap()) }
+            }
+
+            frame_buffers
+        }
+
+        fn setup_command_pool(logical_device: &Device, family_idx: u32) -> vk::CommandPool {
+            let create_info = vk::CommandPoolCreateInfo::default()
+                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+                .queue_family_index(family_idx);
+
+            unsafe { logical_device.create_command_pool(&create_info, None).unwrap() }
+        }
+
+        fn setup_command_buffers(logical_device: &Device, command_pool: vk::CommandPool) -> Vec<vk::CommandBuffer> {
+            let create_info = vk::CommandBufferAllocateInfo::default()
+                .command_pool(command_pool)
+                .level(vk::CommandBufferLevel::PRIMARY)
+                .command_buffer_count(1);
+
+            unsafe { logical_device.allocate_command_buffers(&create_info).unwrap() }
+        }
+
+        fn setup_sync_objects(logical_device: &Device) -> (vk::Semaphore, vk::Semaphore, vk::Fence) {
+            let sem_create_info = vk::SemaphoreCreateInfo::default();
+            let fence_create_info = vk::FenceCreateInfo::default()
+                .flags(vk::FenceCreateFlags::SIGNALED);
+
+            unsafe {
+                (logical_device.create_semaphore(&sem_create_info, None).unwrap(),
+                 logical_device.create_semaphore(&sem_create_info, None).unwrap(),
+                 logical_device.create_fence(&fence_create_info, None).unwrap())
+            }
+        }
+
         let required_extensions: Vec<CString> = Vec::from([
             CString::from(vk::KhrSwapchainFn::name()), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
         ]);
@@ -558,7 +767,7 @@ impl CubulousRenderer {
         let entry = load_entry();
         let window = init_window(&ev_loop);
         let instance = instance_init(&entry, &window, &required_layers).unwrap();
-        let surface: SurfaceKHR;
+        let surface: vk::SurfaceKHR;
         unsafe {
              surface = ash_window::create_surface(
                 &entry,
@@ -578,7 +787,7 @@ impl CubulousRenderer {
             physical_dependencies.family_index,
             &required_extensions,
         );
-        let logical_queue: Queue;
+        let logical_queue: vk::Queue;
         unsafe {
             logical_queue = logical_device
                 .get_device_queue(physical_dependencies.family_index, 0);
@@ -591,7 +800,22 @@ impl CubulousRenderer {
         let image_views = vulkan_setup_image_views(&logical_device,
                                                    &swap_dependencies);
 
-        let shaders = load_all_shaders(&logical_device);
+        let shader_modules = load_all_shaders(&logical_device);
+
+        let pipeline_layout = setup_pipeline_layout(&logical_device);
+
+        let render_pass = setup_render_pass(&logical_device, swap_dependencies.surface_format);
+
+        let pipelines = setup_pipelines(&logical_device, swap_dependencies.surface_format, &shader_modules, pipeline_layout, swap_dependencies.extent);
+
+        let frame_buffers = setup_frame_buffers(&logical_device, &image_views, render_pass, swap_dependencies.extent);
+
+        let command_pool = setup_command_pool(&logical_device, physical_dependencies.family_index);
+
+        let command_buffers = setup_command_buffers(&logical_device, command_pool);
+
+        let (image_available_sem, render_finished_sem, in_flight_fence) =
+        setup_sync_objects(&logical_device);
 
         CubulousRenderer {
             entry,
@@ -610,15 +834,132 @@ impl CubulousRenderer {
             present_modes: physical_dependencies.present_modes,
             logical_queue,
             image_views,
-            shaders
+            shader_modules,
+            pipeline_layout,
+            render_pass,
+            pipelines,
+            frame_buffers,
+            command_pool,
+            command_buffers,
+            image_available_sem,
+            render_finished_sem,
+            in_flight_fence
         }
     }
 
-    pub fn window_id(&self) -> WindowId {
+    fn record_command_buffer(&self, image_index: u32) {
+        // Defines a transformation from a VK image to the framebuffer
+        fn setup_viewport(swap_extent: &vk::Extent2D) -> vk::Viewport {
+            vk::Viewport::default()
+                .x(0.0) // Origin
+                .y(0.0)
+                .width(swap_extent.width as f32) // Max range from origin
+                .height(swap_extent.height as f32)
+                .min_depth(0.0) // ??
+                .max_depth(1.0)
+        }
+
+        fn setup_scissor(swap_extent: &vk::Extent2D) -> vk::Rect2D {
+            vk::Rect2D::default()
+                .offset(vk::Offset2D::default()
+                    .x(0)
+                    .y(0))
+                .extent(*swap_extent)
+        }
+
+        let begin_info = vk::CommandBufferBeginInfo::default();
+
+        let render_offset = vk::Offset2D::default()
+            .x(0)
+            .y(0);
+        let render_extent = vk::Extent2D::default()
+            .height(self.extent.height)
+            .width(self.extent.width);
+        let render_area = vk::Rect2D::default() // Area where shader loads and stores occur
+            .offset(render_offset)
+            .extent(render_extent);
+
+        let clear_colors = [vk::ClearValue {
+            color: vk::ClearColorValue {
+                float32: [0.0, 0.0, 0.0, 1.0], // Values to use for the LOAD_OP_CLEAR attachment operation
+            }
+        }];
+
+        let render_pass_info = vk::RenderPassBeginInfo::default()
+            .render_pass(self.render_pass)
+            .framebuffer(self.frame_buffers[image_index as usize])
+            .render_area(render_area)
+            .clear_values(&clear_colors);
+
+        let viewports = [setup_viewport(&self.extent)];
+
+        let scissors = [setup_scissor(&self.extent)];
+
+        let command_buffer = *self.command_buffers.get(0).unwrap();
+
+        unsafe {
+            self.logical_device.begin_command_buffer(command_buffer, &begin_info).unwrap();
+            self.logical_device.cmd_begin_render_pass(command_buffer,
+                                                      &render_pass_info,
+                                                      vk::SubpassContents::INLINE); // Execute commands in primary buffer
+            self.logical_device.cmd_bind_pipeline(command_buffer,
+                                                  vk::PipelineBindPoint::GRAPHICS,
+                                                  *self.pipelines.get(0).unwrap());
+            self.logical_device.cmd_set_viewport(command_buffer, 0, &viewports);
+            self.logical_device.cmd_set_scissor(command_buffer, 0, &scissors);
+            self.logical_device.cmd_draw(command_buffer,
+                                         3,
+                                         1,
+                                         0, // Vertex buffer offset, lowest value of gl_VertexIndex
+                                         0); // lowest value of gl_InstanceIndex
+            self.logical_device.cmd_end_render_pass(command_buffer);
+            self.logical_device.end_command_buffer(command_buffer).unwrap();
+        }
+    }
+
+    fn draw_frame(&self) {
+        let fences = [self.in_flight_fence];
+        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+        let wait_sems = [self.image_available_sem];
+        let command_buffers = [*self.command_buffers.get(0).unwrap()];
+        let sig_sems = [self.render_finished_sem];
+        let submit_info = vk::SubmitInfo::default()
+            .wait_semaphores(&wait_sems)
+            .wait_dst_stage_mask(&wait_stages)
+            .command_buffers(&command_buffers)
+            .signal_semaphores(&sig_sems);
+        let submit_array = [submit_info];
+        let swap_chains = [self.swap_chain];
+
+        unsafe {
+            self.logical_device.wait_for_fences(&fences, true, u64::MAX).unwrap();
+            self.logical_device.reset_fences(&fences).unwrap();
+            let next_image_idx = self.swap_loader
+                .acquire_next_image(self.swap_chain,
+                                    u64::MAX,
+                                    self.image_available_sem,
+                                    vk::Fence::null()).unwrap().0;
+
+            let image_indices = [next_image_idx];
+            let present_info = vk::PresentInfoKHR::default()
+                .wait_semaphores(&sig_sems)
+                .swapchains(&swap_chains)
+                .image_indices(&image_indices);
+            self.logical_device.reset_command_buffer(*self.command_buffers.get(0).unwrap(),
+                                                     vk::CommandBufferResetFlags::empty())
+                .unwrap();
+            self.record_command_buffer(next_image_idx);
+            self.logical_device.queue_submit(self.logical_queue, &submit_array, self.in_flight_fence).unwrap();
+            self.swap_loader.queue_present(self.logical_queue, &present_info).unwrap();
+        }
+
+    }
+
+    fn window_id(&self) -> WindowId {
         self.window.id()
     }
 
-    pub fn run_blocking(render_id: WindowId, event_loop: EventLoop<()>) {
+    pub fn run_blocking(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, _, control_flow| {
             *control_flow = ControlFlow::Wait;
 
@@ -627,7 +968,8 @@ impl CubulousRenderer {
                     // If event has Event::WindowEvent type and event: WindowEvent::CloseRequested member and if window_id == window.id()
                     event: WindowEvent::CloseRequested,
                     window_id,
-                } if window_id == render_id => *control_flow = ControlFlow::Exit,
+                } if window_id == self.window_id() => *control_flow = ControlFlow::Exit,
+                Event::RedrawRequested(window_id) if window_id == self.window_id() => self.draw_frame(),
                 _ => (), // Similar to the "default" case of a switch statement: return void which is essentially () in Rust
             }
         });
@@ -637,6 +979,21 @@ impl CubulousRenderer {
 impl Drop for CubulousRenderer {
     fn drop(&mut self) {
         unsafe {
+            self.logical_device.destroy_semaphore(self.image_available_sem, None);
+            self.logical_device.destroy_semaphore(self.render_finished_sem, None);
+            self.logical_device.destroy_fence(self.in_flight_fence, None);
+            self.logical_device.destroy_command_pool(self.command_pool, None);
+            for f in self.frame_buffers.iter() {
+                self.logical_device.destroy_framebuffer(*f, None);
+            }
+            for s in self.pipelines.iter() {
+                self.logical_device.destroy_pipeline(*s, None);
+            }
+            self.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
+            self.logical_device.destroy_render_pass(self.render_pass, None);
+            for &s in self.shader_modules.iter() {
+                self.logical_device.destroy_shader_module(s, None);
+            }
             for &v in self.image_views.iter() {
                 self.logical_device.destroy_image_view(v, None);
             }
