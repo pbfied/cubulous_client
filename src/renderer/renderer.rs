@@ -8,11 +8,14 @@ use std::path::Path;
 
 use ash::{vk, Device, Entry, Instance};
 use ash::extensions::khr::{Surface, Swapchain};
+use ash::vk::PhysicalDevice;
 use num::clamp;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds Vulkan functions
 // vk holds Vulkan structs with no methods along with Vulkan macros
 // Instance wraps Entry functions with a winit surface and some under the hood initialization parameters
 // Device is a logical Vulkan device
+
+use vbuffer::Vertex;
 
 use winit::{
     dpi::LogicalSize,
@@ -20,8 +23,37 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Icon, Window, WindowBuilder, WindowId},
 };
+use crate::renderer::vbuffer;
 
-const MAX_FRAMES_IN_FLGIHT: usize = 2;
+const MAX_FRAMES_IN_FLIGHT: usize = 2;
+// const VERTICES: [Vertex; 3] = [
+//    Vertex {
+//        pos: [0.0, -0.5],
+//        color: [1.0, 0.0, 0.0]
+//    },
+//     Vertex {
+//         pos: [0.5, 0.5],
+//         color: [0.0, 1.0, 0.0]
+//     },
+//     Vertex {
+//         pos: [-0.5, 0.5],
+//         color: [0.0, 0.0, 1.0]
+//     }
+// ];
+const VERTICES: [Vertex; 3] = [ // White Vertices
+   Vertex {
+       pos: [0.0, -0.5],
+       color: [1.0, 1.0, 1.0]
+   },
+    Vertex {
+        pos: [0.5, 0.5],
+        color: [0.0, 1.0, 0.0]
+    },
+    Vertex {
+        pos: [-0.5, 0.5],
+        color: [0.0, 0.0, 1.0]
+    }
+];
 
 pub struct CubulousRenderer {
     entry: Entry,
@@ -50,7 +82,9 @@ pub struct CubulousRenderer {
     image_available_sems: Vec<vk::Semaphore>,
     render_finished_sems: Vec<vk::Semaphore>,
     in_flight_fences: Vec<vk::Fence>,
-    current_frame: usize
+    current_frame: usize,
+    vertex_buffer: vk::Buffer,
+    vertex_dev_mem: vk::DeviceMemory
 }
 
 struct PhysicalDependencies {
@@ -290,7 +324,6 @@ fn setup_pipeline_layout(logical_device: &Device) -> vk::PipelineLayout {
 }
 
 fn setup_pipelines(logical_device: &Device,
-                   surface_format: vk::Format,
                    shader_modules: &Vec<vk::ShaderModule>,
                    pipeline_layout: vk::PipelineLayout,
                    render_pass: vk::RenderPass
@@ -315,7 +348,12 @@ fn setup_pipelines(logical_device: &Device,
 
     let pipeline_stages = setup_pipeline_stages(shader_modules);
 
-    let vertex_inputs = vk::PipelineVertexInputStateCreateInfo::default();
+    let vertex_binding_descriptions = [Vertex::get_binding_description()];
+    let vertex_attribute_descriptions = &Vertex::get_attribute_descriptions();
+
+    let vertex_inputs = vk::PipelineVertexInputStateCreateInfo::default()
+        .vertex_attribute_descriptions(vertex_attribute_descriptions)
+        .vertex_binding_descriptions(&vertex_binding_descriptions);
 
     let input_assembly = vk::PipelineInputAssemblyStateCreateInfo::default()
         .topology(vk::PrimitiveTopology::TRIANGLE_LIST) // Triangle from every three vertices
@@ -745,11 +783,55 @@ impl CubulousRenderer {
             unsafe { logical_device.create_command_pool(&create_info, None).unwrap() }
         }
 
+        fn setup_vertex_dev_mem(instance: &Instance,
+                                physical_device: PhysicalDevice,
+                                logical_device: &Device) -> Result<(vk::Buffer, vk::DeviceMemory), String> {
+            let buffer_create_info = vk::BufferCreateInfo::default()
+                .size(mem::size_of_val(&VERTICES) as vk::DeviceSize)
+                .usage(vk::BufferUsageFlags::VERTEX_BUFFER)
+                .sharing_mode(vk::SharingMode::EXCLUSIVE);
+
+            let vertex_buffer = unsafe { logical_device.create_buffer(&buffer_create_info, None).unwrap() };
+
+            let mem_reqs = unsafe {logical_device.get_buffer_memory_requirements(vertex_buffer)};
+
+            let phys_mem_props = unsafe {instance.get_physical_device_memory_properties(physical_device)};
+
+            let mut retval = Err(String::from("Failed to find required memory type in physical device"));
+            for i in 0..phys_mem_props.memory_type_count {
+                if ((1 << i) & mem_reqs.memory_type_bits) > 0 && // If this physical memory type is valid for the requirement
+                    phys_mem_props.memory_types.get(i as usize).unwrap()
+                        .property_flags
+                        .contains(vk::MemoryPropertyFlags::HOST_VISIBLE | // Visible to the host
+                            vk::MemoryPropertyFlags::HOST_COHERENT) { // COHERENT means that copy operations are atomic with respect to subsequent vkQueueSubmit calls
+                                                                        // Explicit flushes are required otherwise
+                    let alloc_info = vk::MemoryAllocateInfo::default()
+                        .allocation_size(mem_reqs.size)
+                        .memory_type_index(i);
+                    let vertex_buffer_mem = unsafe {logical_device.allocate_memory(&alloc_info, None).unwrap()};
+                    unsafe {
+                        logical_device.bind_buffer_memory(vertex_buffer, vertex_buffer_mem, 0).unwrap();
+                        let dev_memory = logical_device
+                            .map_memory(vertex_buffer_mem,
+                                        0, buffer_create_info.size,
+                                        vk::MemoryMapFlags::empty())
+                            .unwrap() as *mut Vertex;
+                        dev_memory.copy_from_nonoverlapping(VERTICES.as_ptr(), VERTICES.len());
+                        logical_device.unmap_memory(vertex_buffer_mem);
+                    }
+                    retval = Ok((vertex_buffer, vertex_buffer_mem));
+                    break;
+                }
+            }
+
+            retval
+        }
+
         fn setup_command_buffers(logical_device: &Device, command_pool: vk::CommandPool) -> Vec<vk::CommandBuffer> {
             let create_info = vk::CommandBufferAllocateInfo::default()
                 .command_pool(command_pool)
                 .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(MAX_FRAMES_IN_FLGIHT as u32);
+                .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32);
 
             unsafe { logical_device.allocate_command_buffers(&create_info).unwrap() }
         }
@@ -759,11 +841,11 @@ impl CubulousRenderer {
             let fence_create_info = vk::FenceCreateInfo::default()
                 .flags(vk::FenceCreateFlags::SIGNALED);
 
-            let mut image_avail_vec: Vec<vk::Semaphore> = Vec::with_capacity(MAX_FRAMES_IN_FLGIHT as usize);
-            let mut render_finished_vec: Vec<vk::Semaphore> = Vec::with_capacity(MAX_FRAMES_IN_FLGIHT as usize);
-            let mut fences_vec: Vec<vk::Fence> = Vec::with_capacity(MAX_FRAMES_IN_FLGIHT as usize);
+            let mut image_avail_vec: Vec<vk::Semaphore> = Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
+            let mut render_finished_vec: Vec<vk::Semaphore> = Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
+            let mut fences_vec: Vec<vk::Fence> = Vec::with_capacity(MAX_FRAMES_IN_FLIGHT as usize);
 
-            for _ in 0..MAX_FRAMES_IN_FLGIHT {
+            for _ in 0..MAX_FRAMES_IN_FLIGHT {
                 unsafe {
                     image_avail_vec.push(logical_device.create_semaphore(&sem_create_info, None).unwrap());
                     render_finished_vec.push(logical_device.create_semaphore(&sem_create_info, None).unwrap());
@@ -822,13 +904,14 @@ impl CubulousRenderer {
         let render_pass = setup_render_pass(&logical_device, swap_dependencies.surface_format);
 
         let pipelines = setup_pipelines(&logical_device,
-                                        swap_dependencies.surface_format,
                                         &shader_modules, pipeline_layout,
                                         render_pass);
 
         let frame_buffers = setup_frame_buffers(&logical_device, &image_views, render_pass, swap_dependencies.extent);
 
         let command_pool = setup_command_pool(&logical_device, physical_dependencies.family_index);
+
+        let (vertex_buffer, vertex_dev_mem) = setup_vertex_dev_mem(&instance, physical_dependencies.physical_device, &logical_device).unwrap();
 
         let command_buffers = setup_command_buffers(&logical_device, command_pool);
 
@@ -864,7 +947,9 @@ impl CubulousRenderer {
             image_available_sems,
             render_finished_sems,
             in_flight_fences,
-            current_frame
+            current_frame,
+            vertex_buffer,
+            vertex_dev_mem
         }
     }
 
@@ -918,6 +1003,10 @@ impl CubulousRenderer {
 
         let command_buffer = *self.command_buffers.get(self.current_frame).unwrap();
 
+        let vertex_buffers = [self.vertex_buffer];
+
+        let offsets: [vk::DeviceSize; 1] = [0];
+
         unsafe {
             self.logical_device.begin_command_buffer(command_buffer, &begin_info).unwrap();
             self.logical_device.cmd_begin_render_pass(command_buffer,
@@ -926,10 +1015,11 @@ impl CubulousRenderer {
             self.logical_device.cmd_bind_pipeline(command_buffer,
                                                   vk::PipelineBindPoint::GRAPHICS,
                                                   *self.pipelines.get(0).unwrap());
+            self.logical_device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
             self.logical_device.cmd_set_viewport(command_buffer, 0, &viewports);
             self.logical_device.cmd_set_scissor(command_buffer, 0, &scissors);
             self.logical_device.cmd_draw(command_buffer,
-                                         3,
+                                         VERTICES.len() as u32,
                                          1,
                                          0, // Vertex buffer offset, lowest value of gl_VertexIndex
                                          0); // lowest value of gl_InstanceIndex
@@ -959,7 +1049,7 @@ impl CubulousRenderer {
                                     u64::MAX,
                                     *self.image_available_sems.get(self.current_frame).unwrap(),
                                     vk::Fence::null()) {
-                Ok((img_idx)) => img_idx,
+                Ok(img_idx) => img_idx,
                 Err(result) => match result {
                     vk::Result::ERROR_OUT_OF_DATE_KHR => { self.recreate_swap_chain(); return },
                     _ => panic!("Unknown error at acquire_next_image")
@@ -989,7 +1079,7 @@ impl CubulousRenderer {
             }
         }
 
-        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLGIHT;
+        self.current_frame = (self.current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     fn cleanup_swap_chain(&self) {
@@ -1060,6 +1150,8 @@ impl Drop for CubulousRenderer {
     fn drop(&mut self) {
         self.cleanup_swap_chain();
         unsafe {
+            self.logical_device.destroy_buffer(self.vertex_buffer, None);
+            self.logical_device.free_memory(self.vertex_dev_mem, None);
             for i in self.image_available_sems.iter() {
                 self.logical_device.destroy_semaphore(*i, None);
             }
