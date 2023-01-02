@@ -1,11 +1,11 @@
 pub mod renderer;
-pub mod vbuffer;
-pub mod ibuffer;
+pub mod index;
 mod core;
 mod physical_layer;
 mod render_target;
 mod logical_layer;
 mod render_pass;
 mod raster_pipeline;
+mod staging_buf;
 mod vertex;
 mod frame_buffers;

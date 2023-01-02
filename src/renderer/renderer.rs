@@ -8,7 +8,7 @@ use std::path::Path;
 
 use ash::{vk, Device, Entry, Instance};
 use ash::extensions::khr::{Surface, Swapchain};
-use ash::vk::PhysicalDevice;
+use ash::vk::{CommandBuffer, PhysicalDevice};
 use num::clamp;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds Vulkan functions
 // vk holds Vulkan structs with no methods along with Vulkan macros
@@ -28,8 +28,8 @@ use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::raster_pipeline::RasterPipeline;
 use crate::renderer::render_pass::{destroy_render_pass, setup_render_pass};
 use crate::renderer::render_target::RenderTarget;
-use crate::renderer::vbuffer;
 use crate::renderer::vertex::{VertexBuffer, Vertex};
+use crate::renderer::index::{Index, IndexBuffer};
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 const VERTICES: [Vertex; 4] = [ // White Vertices
@@ -51,6 +51,9 @@ const VERTICES: [Vertex; 4] = [ // White Vertices
     }
 ];
 
+const INDICES: Index = Index {
+    data: [0, 1, 2, 2, 3, 0]
+};
 
 pub struct CubulousRenderer {
     core: Core, // Windowing handles and Vk instance
@@ -67,6 +70,7 @@ pub struct CubulousRenderer {
     in_flight_fences: Vec<vk::Fence>,
     current_frame: usize,
     vertex_buffer: VertexBuffer,
+    index_buffer: IndexBuffer
 }
 
 impl CubulousRenderer {
@@ -120,9 +124,20 @@ impl CubulousRenderer {
         let render_pass = setup_render_pass(&logical_layer, &render_target);
         let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass);
         let frame_buffers = setup_frame_buffers(&logical_layer, render_pass, &render_target);
-        let command_pool = setup_command_pool(&logical_layer, &physical_layer);
+
+        let pool_create_info = vk::CommandPoolCreateInfo::default()
+            .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
+            .queue_family_index(physical_layer.family_index);
+        let command_pool = unsafe { logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap() };
+
+        let buf_create_info = vk::CommandBufferAllocateInfo::default()
+            .command_pool(command_pool)
+            .level(vk::CommandBufferLevel::PRIMARY)
+            .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32);
+        let command_buffers = unsafe { logical_layer.logical_device.allocate_command_buffers(&buf_create_info).unwrap() };
+
         let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &VERTICES);
-        let command_buffers = setup_command_buffers(&logical_layer, command_pool);
+        let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &INDICES);
 
         let (image_available_sems, render_finished_sems, in_flight_fences) =
         setup_sync_objects(&logical_layer);
@@ -143,7 +158,8 @@ impl CubulousRenderer {
             render_finished_sems,
             in_flight_fences,
             current_frame,
-            vertex_buffer
+            vertex_buffer,
+            index_buffer
         }
     }
 
@@ -228,13 +244,15 @@ impl CubulousRenderer {
                                                   vk::PipelineBindPoint::GRAPHICS,
                                                   *self.raster_pipeline.pipelines.get(0).unwrap());
             self.logical_layer.logical_device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
+            self.logical_layer.logical_device.cmd_bind_index_buffer(command_buffer, self.index_buffer.buf, 0, vk::IndexType::UINT16);
             self.logical_layer.logical_device.cmd_set_viewport(command_buffer, 0, &viewports);
             self.logical_layer.logical_device.cmd_set_scissor(command_buffer, 0, &scissors);
-            self.logical_layer.logical_device.cmd_draw(command_buffer,
-                                         self.vertex_buffer.vertex_count,
-                                         1,
-                                         0, // Vertex buffer offset, lowest value of gl_VertexIndex
-                                         0); // lowest value of gl_InstanceIndex
+            // self.logical_layer.logical_device.cmd_draw(command_buffer,
+            //                              self.vertex_buffer.vertex_count,
+            //                              1,
+            //                              0, // Vertex buffer offset, lowest value of gl_VertexIndex
+            //                              0); // lowest value of gl_InstanceIndex
+            self.logical_layer.logical_device.cmd_draw_indexed(command_buffer, self.index_buffer.index_count, 1, 0, 0, 0);
             self.logical_layer.logical_device.cmd_end_render_pass(command_buffer);
             self.logical_layer.logical_device.end_command_buffer(command_buffer).unwrap();
         }
@@ -335,6 +353,7 @@ impl CubulousRenderer {
 impl Drop for CubulousRenderer {
     fn drop(&mut self) {
         self.cleanup_swap_chain();
+        self.index_buffer.destroy(&self.logical_layer);
         self.vertex_buffer.destroy(&self.logical_layer);
         self.destroy_sync_objects();
         self.destroy_command_pool();
