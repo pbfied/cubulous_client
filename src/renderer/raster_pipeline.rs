@@ -8,6 +8,7 @@ use ash::vk;
 
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::render_target::RenderTarget;
+use crate::renderer::ubo::create_descriptor_set_layout;
 use crate::renderer::vertex::Vertex;
 
 fn load_shader(path: &str) -> Result<Vec<u8>, String> {
@@ -46,16 +47,26 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
     shader_modules
 }
 
-fn setup_pipeline_layout(logical_layer: &LogicalLayer) -> vk::PipelineLayout {
-    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default();
+fn setup_pipeline_layout(logical_layer: &LogicalLayer) -> (vk::PipelineLayout, vk::DescriptorSetLayout)  {
+    let ubo_layout_binding = create_descriptor_set_layout(logical_layer);
 
+    let ubo_layout_binding_arr = [ubo_layout_binding];
+
+    let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
+        .set_layouts(&ubo_layout_binding_arr);
+
+    let pipeline_layout: vk::PipelineLayout;
     unsafe {
-        logical_layer.logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap() }
+        pipeline_layout = logical_layer.logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap();
+    }
+
+    (pipeline_layout, ubo_layout_binding)
 }
 
 pub(crate) struct RasterPipeline {
-    pipeline_layout: vk::PipelineLayout,
-    pub(crate) pipelines: Vec<vk::Pipeline>,
+    pub(crate) pipeline_layout: vk::PipelineLayout,
+    descriptor_set_layout: vk::DescriptorSetLayout,
+    pub(crate) pipelines: Vec<vk::Pipeline>
 }
 
 impl RasterPipeline {
@@ -142,7 +153,7 @@ impl RasterPipeline {
         let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::default()
             .dynamic_states(&dynamic_states);
 
-        let pipeline_layout = setup_pipeline_layout(logical_layer);
+        let (pipeline_layout, descriptor_set_layout) = setup_pipeline_layout(logical_layer);
 
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&pipeline_stages)
@@ -168,12 +179,14 @@ impl RasterPipeline {
 
         RasterPipeline {
             pipeline_layout,
+            descriptor_set_layout,
             pipelines
         }
     }
 
     pub(crate) fn destroy(&mut self, logical_layer: &LogicalLayer) {
         unsafe {
+            logical_layer.logical_device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
             for s in self.pipelines.iter() {
                 logical_layer.logical_device.destroy_pipeline(*s, None);
             }

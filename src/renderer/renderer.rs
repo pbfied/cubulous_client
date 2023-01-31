@@ -22,6 +22,7 @@ use winit::{
     window::{Icon, Window, WindowBuilder, WindowId},
 };
 use crate::renderer::core::Core;
+use crate::renderer::descriptor::Descriptor;
 use crate::renderer::frame_buffers::{destroy_frame_buffers, setup_frame_buffers};
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
@@ -30,9 +31,10 @@ use crate::renderer::render_pass::{destroy_render_pass, setup_render_pass};
 use crate::renderer::render_target::RenderTarget;
 use crate::renderer::vertex::{VertexBuffer, Vertex};
 use crate::renderer::index::{Index, IndexBuffer};
+use crate::renderer::ubo::UniformBuffer;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-const VERTICES: [Vertex; 4] = [ // White Vertices
+const VERTICES: [Vertex; 4] = [
     Vertex {
         pos: [-0.5, -0.5],
         color: [1.0, 0.0, 0.0]
@@ -70,7 +72,9 @@ pub struct CubulousRenderer {
     in_flight_fences: Vec<vk::Fence>,
     current_frame: usize,
     vertex_buffer: VertexBuffer,
-    index_buffer: IndexBuffer
+    index_buffer: IndexBuffer,
+    uniform_buffer: UniformBuffer,
+    descriptor: Descriptor
 }
 
 impl CubulousRenderer {
@@ -138,6 +142,8 @@ impl CubulousRenderer {
 
         let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &VERTICES);
         let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &INDICES);
+        let uniform_buffer = UniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
+        let descriptor = Descriptor::new(&logical_layer, &uniform_buffer, MAX_FRAMES_IN_FLIGHT);
 
         let (image_available_sems, render_finished_sems, in_flight_fences) =
         setup_sync_objects(&logical_layer);
@@ -159,7 +165,9 @@ impl CubulousRenderer {
             in_flight_fences,
             current_frame,
             vertex_buffer,
-            index_buffer
+            index_buffer,
+            uniform_buffer,
+            descriptor
         }
     }
 
@@ -252,6 +260,12 @@ impl CubulousRenderer {
             //                              1,
             //                              0, // Vertex buffer offset, lowest value of gl_VertexIndex
             //                              0); // lowest value of gl_InstanceIndex
+            self.logical_layer.logical_device.cmd_bind_descriptor_sets(command_buffer,
+                                                                       vk::PipelineBindPoint::GRAPHICS,
+                                                                       self.raster_pipeline.pipeline_layout,
+                                                                       0,
+                                                                       &[*self.descriptor.sets.get(self.current_frame).unwrap()],
+                                                                       &[]);
             self.logical_layer.logical_device.cmd_draw_indexed(command_buffer, self.index_buffer.index_count, 1, 0, 0, 0);
             self.logical_layer.logical_device.cmd_end_render_pass(command_buffer);
             self.logical_layer.logical_device.end_command_buffer(command_buffer).unwrap();
@@ -271,6 +285,8 @@ impl CubulousRenderer {
             .signal_semaphores(&sig_sems);
         let submit_array = [submit_info];
         let swap_chains = [self.render_target.swap_chain];
+
+        self.uniform_buffer.build_transforms(&self.render_target, self.current_frame);
 
         unsafe {
             self.logical_layer.logical_device.wait_for_fences(&fences, true, u64::MAX).unwrap();
@@ -332,7 +348,7 @@ impl CubulousRenderer {
 
     pub fn run_blocking(mut self, event_loop: EventLoop<()>) {
         event_loop.run(move |event, _, control_flow| {
-            *control_flow = ControlFlow::Wait;
+            control_flow.set_poll();
 
             match event {
                 Event::WindowEvent {
@@ -353,11 +369,13 @@ impl CubulousRenderer {
 impl Drop for CubulousRenderer {
     fn drop(&mut self) {
         self.cleanup_swap_chain();
+        self.descriptor.destroy(&self.logical_layer);
         self.index_buffer.destroy(&self.logical_layer);
         self.vertex_buffer.destroy(&self.logical_layer);
         self.destroy_sync_objects();
         self.destroy_command_pool();
         self.raster_pipeline.destroy(&self.logical_layer);
+        self.uniform_buffer.destroy(&self.logical_layer);
         destroy_render_pass(&self.logical_layer, self.render_pass);
         self.logical_layer.destroy();
         self.core.destroy();

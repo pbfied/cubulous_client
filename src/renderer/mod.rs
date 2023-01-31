@@ -9,3 +9,5 @@ mod raster_pipeline;
 mod staging_buf;
 mod vertex;
 mod frame_buffers;
+mod ubo;
+mod descriptor;
