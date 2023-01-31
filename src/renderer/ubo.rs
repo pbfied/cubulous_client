@@ -64,7 +64,7 @@ impl UniformBuffer {
         let time = current_time.duration_since(self.start_time).as_millis() as f32 / 1000.0;
 
         let transform_matrices = [UniformBufferObject {
-            model: Matrix4::from_angle_z(Deg(90.0 * time)) * Matrix4::<f32>::identity(),
+            model: Matrix4::from_angle_z(Deg(90.0 * time)),
             view: Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0),
                                       Point3::new(0.0, 0.0, 0.0),
                                       Vector3::new(0.0, 0.0, 1.0)),
