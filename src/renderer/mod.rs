@@ -11,3 +11,6 @@ mod vertex;
 mod frame_buffers;
 mod ubo;
 mod descriptor;
+mod texture;
+mod image;
+mod sampler;

@@ -17,3 +17,4 @@ ash-window = { path = "../ash/ash-window" }
 png = "0.17.6"
 memoffset = "0.7.1"
 cgmath = "0.18.0"
+image = "0.24.5"

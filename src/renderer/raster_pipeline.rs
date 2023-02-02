@@ -5,10 +5,10 @@ use std::marker::PhantomData;
 use std::mem;
 
 use ash::vk;
+use ash::vk::PipelineLayoutCreateFlags;
 
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::render_target::RenderTarget;
-use crate::renderer::ubo::create_descriptor_set_layout;
 use crate::renderer::vertex::Vertex;
 
 fn load_shader(path: &str) -> Result<Vec<u8>, String> {
@@ -47,30 +47,25 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
     shader_modules
 }
 
-fn setup_pipeline_layout(logical_layer: &LogicalLayer) -> (vk::PipelineLayout, vk::DescriptorSetLayout)  {
-    let ubo_layout_binding = create_descriptor_set_layout(logical_layer);
-
-    let ubo_layout_binding_arr = [ubo_layout_binding];
+fn setup_pipeline_layout(logical_layer: &LogicalLayer, layout: vk::DescriptorSetLayout) -> vk::PipelineLayout  {
+    let ubo_layout_binding_arr = [layout];
 
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
-        .set_layouts(&ubo_layout_binding_arr);
+        .set_layouts(&ubo_layout_binding_arr)
+        .flags(PipelineLayoutCreateFlags::empty());
 
-    let pipeline_layout: vk::PipelineLayout;
     unsafe {
-        pipeline_layout = logical_layer.logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap();
+        logical_layer.logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap()
     }
-
-    (pipeline_layout, ubo_layout_binding)
 }
 
 pub(crate) struct RasterPipeline {
     pub(crate) pipeline_layout: vk::PipelineLayout,
-    descriptor_set_layout: vk::DescriptorSetLayout,
     pub(crate) pipelines: Vec<vk::Pipeline>
 }
 
 impl RasterPipeline {
-    pub(crate) fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass) -> RasterPipeline {
+    pub(crate) fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass, layout: vk::DescriptorSetLayout) -> RasterPipeline {
         fn setup_pipeline_stages(shader_modules: &Vec<vk::ShaderModule>) -> Vec<vk::PipelineShaderStageCreateInfo> {
             // Reminder that shader modules are in [vert, frag] order
             let create_bits = [vk::ShaderStageFlags::VERTEX,
@@ -153,7 +148,7 @@ impl RasterPipeline {
         let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::default()
             .dynamic_states(&dynamic_states);
 
-        let (pipeline_layout, descriptor_set_layout) = setup_pipeline_layout(logical_layer);
+        let pipeline_layout = setup_pipeline_layout(logical_layer, layout);
 
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&pipeline_stages)
@@ -179,14 +174,12 @@ impl RasterPipeline {
 
         RasterPipeline {
             pipeline_layout,
-            descriptor_set_layout,
             pipelines
         }
     }
 
     pub(crate) fn destroy(&mut self, logical_layer: &LogicalLayer) {
         unsafe {
-            logical_layer.logical_device.destroy_descriptor_set_layout(self.descriptor_set_layout, None);
             for s in self.pipelines.iter() {
                 logical_layer.logical_device.destroy_pipeline(*s, None);
             }

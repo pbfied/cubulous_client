@@ -85,21 +85,3 @@ impl UniformBuffer {
         }
     }
 }
-
-// Use Ash builtin to destroy the descriptor set layout
-pub(crate) fn create_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
-    let binding = vk::DescriptorSetLayoutBinding::default()
-        .binding(0)
-        .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
-        .descriptor_count(1)
-        .stage_flags(vk::ShaderStageFlags::VERTEX);
-
-    let binding_arr = [binding];
-
-    let layout = vk::DescriptorSetLayoutCreateInfo::default()
-        .bindings(&binding_arr);
-
-    unsafe {
-        logical_layer.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
-    }
-}

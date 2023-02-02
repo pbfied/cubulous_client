@@ -77,7 +77,7 @@ impl PhysicalLayer {
                                                     required_extensions) &&
                 !present_modes.is_empty() &&
                 !surface_formats.is_empty() &&
-                !present_modes.is_empty() {
+                dev_features.sampler_anisotropy == vk::TRUE {
                 let queue_families: Vec<vk::QueueFamilyProperties>;
                 unsafe {
                     queue_families = core.instance

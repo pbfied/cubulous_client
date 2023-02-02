@@ -8,7 +8,7 @@ use std::path::Path;
 
 use ash::{vk, Device, Entry, Instance};
 use ash::extensions::khr::{Surface, Swapchain};
-use ash::vk::{CommandBuffer, PhysicalDevice};
+use ash::vk::Sampler;
 use num::clamp;
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds Vulkan functions
 // vk holds Vulkan structs with no methods along with Vulkan macros
@@ -22,7 +22,7 @@ use winit::{
     window::{Icon, Window, WindowBuilder, WindowId},
 };
 use crate::renderer::core::Core;
-use crate::renderer::descriptor::Descriptor;
+use crate::renderer::descriptor::{create_descriptor_set_layout, Descriptor};
 use crate::renderer::frame_buffers::{destroy_frame_buffers, setup_frame_buffers};
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
@@ -31,25 +31,31 @@ use crate::renderer::render_pass::{destroy_render_pass, setup_render_pass};
 use crate::renderer::render_target::RenderTarget;
 use crate::renderer::vertex::{VertexBuffer, Vertex};
 use crate::renderer::index::{Index, IndexBuffer};
+use crate::renderer::sampler::{create_sampler, destroy_sampler};
+use crate::renderer::texture::Texture;
 use crate::renderer::ubo::UniformBuffer;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 const VERTICES: [Vertex; 4] = [
     Vertex {
         pos: [-0.5, -0.5],
-        color: [1.0, 0.0, 0.0]
+        color: [1.0, 0.0, 0.0],
+        texCoord: [1.0, 0.0]
     },
     Vertex {
         pos: [0.5, -0.5],
-        color: [0.0, 1.0, 0.0]
+        color: [0.0, 1.0, 0.0],
+        texCoord: [0.0, 0.0]
     },
     Vertex {
         pos: [0.5, 0.5],
-        color: [0.0, 0.0, 1.0]
+        color: [0.0, 0.0, 1.0],
+        texCoord: [0.0, 1.0]
     },
     Vertex {
         pos: [-0.5, 0.5],
-        color: [1.0, 1.0, 1.0]
+        color: [1.0, 1.0, 1.0],
+        texCoord: [1.0, 1.0]
     }
 ];
 
@@ -74,7 +80,9 @@ pub struct CubulousRenderer {
     vertex_buffer: VertexBuffer,
     index_buffer: IndexBuffer,
     uniform_buffer: UniformBuffer,
-    descriptor: Descriptor
+    descriptor: Descriptor,
+    texture: Texture,
+    sampler: Sampler
 }
 
 impl CubulousRenderer {
@@ -126,7 +134,8 @@ impl CubulousRenderer {
         let logical_layer = LogicalLayer::new(&core, &physical_layer, &required_extensions);
         let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer);
         let render_pass = setup_render_pass(&logical_layer, &render_target);
-        let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass);
+        let descriptor_layout = create_descriptor_set_layout(&logical_layer);
+        let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass, descriptor_layout);
         let frame_buffers = setup_frame_buffers(&logical_layer, render_pass, &render_target);
 
         let pool_create_info = vk::CommandPoolCreateInfo::default()
@@ -143,7 +152,9 @@ impl CubulousRenderer {
         let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &VERTICES);
         let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &INDICES);
         let uniform_buffer = UniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
-        let descriptor = Descriptor::new(&logical_layer, &uniform_buffer, MAX_FRAMES_IN_FLIGHT);
+        let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "assets/texture.jpg");
+        let sampler = create_sampler(&core, &physical_layer, &logical_layer);
+        let descriptor = Descriptor::new(&logical_layer, &uniform_buffer, sampler, &texture, descriptor_layout, MAX_FRAMES_IN_FLIGHT);
 
         let (image_available_sems, render_finished_sems, in_flight_fences) =
         setup_sync_objects(&logical_layer);
@@ -167,7 +178,9 @@ impl CubulousRenderer {
             vertex_buffer,
             index_buffer,
             uniform_buffer,
-            descriptor
+            descriptor,
+            texture,
+            sampler
         }
     }
 
@@ -369,6 +382,8 @@ impl CubulousRenderer {
 impl Drop for CubulousRenderer {
     fn drop(&mut self) {
         self.cleanup_swap_chain();
+        destroy_sampler(&self.logical_layer, self.sampler);
+        self.texture.destroy(&self.logical_layer);
         self.descriptor.destroy(&self.logical_layer);
         self.index_buffer.destroy(&self.logical_layer);
         self.vertex_buffer.destroy(&self.logical_layer);

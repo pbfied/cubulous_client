@@ -11,6 +11,7 @@ use winit::{
 };
 
 use crate::renderer::core::Core;
+use crate::renderer::image::create_image_view;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 
@@ -49,27 +50,8 @@ impl RenderTarget {
 
             let mut image_views: Vec<vk::ImageView> = Vec::new();
             for i in swap_chain_images {
-                let create_info = vk::ImageViewCreateInfo::default()
-                    .image(i)
-                    .view_type(vk::ImageViewType::TYPE_2D)
-                    .format(surface_format)
-                    .components(vk::ComponentMapping { // Allows remapping of color channels, I.E. turn all blues into shades of red
-                        r: vk::ComponentSwizzle::IDENTITY,
-                        g: vk::ComponentSwizzle::IDENTITY,
-                        b: vk::ComponentSwizzle::IDENTITY,
-                        a: vk::ComponentSwizzle::IDENTITY
-                    })
-                    .subresource_range(vk::ImageSubresourceRange { // Describes image purpose, I.E. a human
-                        // viewable image for something like VR is composed of multiple images
-                        aspect_mask: vk::ImageAspectFlags::COLOR,
-                        base_mip_level: 0,
-                        level_count: 1,
-                        base_array_layer: 0,
-                        layer_count: 1
-                    });
-
                 unsafe {
-                    image_views.push(  logical_layer.logical_device.create_image_view(&create_info, None).unwrap());
+                    image_views.push(create_image_view(logical_layer, i, surface_format));
                 }
             }
 
