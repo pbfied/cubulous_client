@@ -22,6 +22,7 @@ use winit::{
     window::{Icon, Window, WindowBuilder, WindowId},
 };
 use crate::renderer::core::Core;
+use crate::renderer::depth::{Depth, find_depth_format};
 use crate::renderer::descriptor::{create_descriptor_set_layout, Descriptor};
 use crate::renderer::frame_buffers::{destroy_frame_buffers, setup_frame_buffers};
 use crate::renderer::logical_layer::LogicalLayer;
@@ -36,31 +37,52 @@ use crate::renderer::texture::Texture;
 use crate::renderer::ubo::UniformBuffer;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
-const VERTICES: [Vertex; 4] = [
+const VERTICES: [Vertex; 8] = [
     Vertex {
-        pos: [-0.5, -0.5],
+        pos: [-0.5, -0.5, 0.0],
         color: [1.0, 0.0, 0.0],
         texCoord: [1.0, 0.0]
     },
     Vertex {
-        pos: [0.5, -0.5],
+        pos: [0.5, -0.5, 0.0],
         color: [0.0, 1.0, 0.0],
         texCoord: [0.0, 0.0]
     },
     Vertex {
-        pos: [0.5, 0.5],
+        pos: [0.5, 0.5, 0.0],
         color: [0.0, 0.0, 1.0],
         texCoord: [0.0, 1.0]
     },
     Vertex {
-        pos: [-0.5, 0.5],
+        pos: [-0.5, 0.5, 0.0],
         color: [1.0, 1.0, 1.0],
         texCoord: [1.0, 1.0]
-    }
+    },
+
+    Vertex {
+        pos: [-0.5, -0.5, -0.5],
+        color: [1.0, 0.0, 0.0],
+        texCoord: [1.0, 0.0]
+    },
+    Vertex {
+        pos: [0.5, -0.5, -0.5],
+        color: [0.0, 1.0, 0.0],
+        texCoord: [0.0, 0.0]
+    },
+    Vertex {
+        pos: [0.5, 0.5, -0.5],
+        color: [0.0, 0.0, 1.0],
+        texCoord: [0.0, 1.0]
+    },
+    Vertex {
+        pos: [-0.5, 0.5, -0.5],
+        color: [1.0, 1.0, 1.0],
+        texCoord: [1.0, 1.0]
+    },
 ];
 
 const INDICES: Index = Index {
-    data: [0, 1, 2, 2, 3, 0]
+    data: [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4]
 };
 
 pub struct CubulousRenderer {
@@ -82,7 +104,8 @@ pub struct CubulousRenderer {
     uniform_buffer: UniformBuffer,
     descriptor: Descriptor,
     texture: Texture,
-    sampler: Sampler
+    sampler: Sampler,
+    depth: Depth
 }
 
 impl CubulousRenderer {
@@ -133,15 +156,16 @@ impl CubulousRenderer {
         let physical_layer = PhysicalLayer::new(&core, &required_extensions).unwrap();
         let logical_layer = LogicalLayer::new(&core, &physical_layer, &required_extensions);
         let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer);
-        let render_pass = setup_render_pass(&logical_layer, &render_target);
+        let render_pass = setup_render_pass(&logical_layer, &render_target, find_depth_format(&core, &physical_layer));
         let descriptor_layout = create_descriptor_set_layout(&logical_layer);
         let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass, descriptor_layout);
-        let frame_buffers = setup_frame_buffers(&logical_layer, render_pass, &render_target);
-
         let pool_create_info = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(physical_layer.family_index);
         let command_pool = unsafe { logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap() };
+
+        let depth = Depth::new(&core, &physical_layer, &logical_layer, &render_target, command_pool);
+        let frame_buffers = setup_frame_buffers(&logical_layer, render_pass, &render_target, depth.view);
 
         let buf_create_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(command_pool)
@@ -180,7 +204,8 @@ impl CubulousRenderer {
             uniform_buffer,
             descriptor,
             texture,
-            sampler
+            sampler,
+            depth
         }
     }
 
@@ -234,17 +259,26 @@ impl CubulousRenderer {
             .offset(render_offset)
             .extent(render_extent);
 
-        let clear_colors = [vk::ClearValue {
-            color: vk::ClearColorValue {
-                float32: [0.0, 0.0, 0.0, 1.0], // Values to use for the LOAD_OP_CLEAR attachment operation
+        let clear_color_value = vk::ClearColorValue {
+            float32: [0.0, 0.0, 0.0, 1.0]
+        };
+        let clear_depth_stencil = vk::ClearDepthStencilValue::default()
+            .depth(1.0)
+            .stencil(0);
+        let clear_values = [
+            vk::ClearValue {
+                color: clear_color_value
+            },
+            vk::ClearValue {
+                depth_stencil: clear_depth_stencil
             }
-        }];
+        ];
 
         let render_pass_info = vk::RenderPassBeginInfo::default()
             .render_pass(self.render_pass)
             .framebuffer(self.frame_buffers[image_index as usize])
             .render_area(render_area)
-            .clear_values(&clear_colors);
+            .clear_values(&clear_values);
 
         let viewports = [setup_viewport(&self.render_target.extent)];
 
@@ -344,6 +378,7 @@ impl CubulousRenderer {
     fn cleanup_swap_chain(&self) {
         self.logical_layer.wait_idle();
 
+        self.depth.destroy(&self.logical_layer);
         destroy_frame_buffers(&self.logical_layer, &self.frame_buffers);
         self.render_target.destroy(&self.logical_layer);
     }
@@ -351,8 +386,9 @@ impl CubulousRenderer {
     fn recreate_swap_chain(&mut self) {
         self.cleanup_swap_chain();
 
+        self.depth = Depth::new(&self.core, &self.physical_layer, &self.logical_layer, &self.render_target, self.command_pool);
         self.render_target = RenderTarget::new(&self.core, &self.physical_layer, &self.logical_layer);
-        self.frame_buffers = setup_frame_buffers(&self.logical_layer, self.render_pass, &self.render_target);
+        self.frame_buffers = setup_frame_buffers(&self.logical_layer, self.render_pass, &self.render_target, self.depth.view);
     }
 
     fn window_id(&self) -> WindowId {

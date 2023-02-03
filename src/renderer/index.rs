@@ -16,7 +16,7 @@ pub(crate) struct IndexBuffer {
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]
 pub(crate) struct Index {
-    pub data: [u16; 6]
+    pub data: [u16; 12]
 }
 
 impl IndexBuffer {

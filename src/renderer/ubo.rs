@@ -61,14 +61,20 @@ impl UniformBuffer {
 
     pub(crate) fn build_transforms(&self, render_target: &RenderTarget, current_frame: usize) {
         let current_time = Instant::now();
-        let time = current_time.duration_since(self.start_time).as_millis() as f32 / 1000.0;
+        // let time = current_time.duration_since(self.start_time).as_millis() as f32 / 1000.0;
+        let time = 0.0;
 
+        let mut perspective = perspective(Deg(45.0),
+                                          (render_target.extent.width as f32) /
+                                              (render_target.extent.height as f32),
+                                          0.1, 10.0);
+        perspective.y.y *= -1.0;
         let transform_matrices = [UniformBufferObject {
             model: Matrix4::from_angle_z(Deg(90.0 * time)),
             view: Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0),
                                       Point3::new(0.0, 0.0, 0.0),
                                       Vector3::new(0.0, 0.0, 1.0)),
-            proj: perspective(Deg(45.0), (render_target.extent.width as f32) / (render_target.extent.height as f32), 0.1, 10.0)
+            proj: perspective
         }];
 
         unsafe {

@@ -9,7 +9,7 @@ use crate::renderer::staging_buf::{create_buffer, find_buf_index, begin_single_t
 use crate::renderer::image::{create_image_view, create_image, copy_buffer_to_image, transition_image_layout};
 
 fn create_texture_image_view(logical_layer: &LogicalLayer, image: vk::Image) -> vk::ImageView {
-    create_image_view(logical_layer, image, vk::Format::R8G8B8A8_SRGB)
+    create_image_view(logical_layer, image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR)
 }
 
 pub(crate) struct Texture {

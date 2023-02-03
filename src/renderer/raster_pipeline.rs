@@ -109,7 +109,7 @@ impl RasterPipeline {
             .polygon_mode(vk::PolygonMode::FILL) // Determines whether polygons are represented as points, lines or surfaces
             .line_width(1.0) // Line thickness in units of fragment numbers (probably roughly equivalent to pixels?)
             .cull_mode(vk::CullModeFlags::BACK) // Cull the back faces of geometry
-            .front_face(vk::FrontFace::CLOCKWISE) // Rules for determining if a face is front ??
+            .front_face(vk::FrontFace::COUNTER_CLOCKWISE) // Rules for determining if a face is front ??
             .depth_bias_enable(false) // Parameters for transforming depth values
             .depth_bias_constant_factor(0.0)
             .depth_bias_clamp(0.0)
@@ -150,6 +150,14 @@ impl RasterPipeline {
 
         let pipeline_layout = setup_pipeline_layout(logical_layer, layout);
 
+        let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_test_enable(true)
+            .depth_write_enable(true)
+            .depth_compare_op(vk::CompareOp::LESS)
+            .depth_bounds_test_enable(false)
+            .front(vk::StencilOpState::default())
+            .back(vk::StencilOpState::default());
+
         let pipeline_info = vk::GraphicsPipelineCreateInfo::default()
             .stages(&pipeline_stages)
             .vertex_input_state(&vertex_inputs)
@@ -157,7 +165,7 @@ impl RasterPipeline {
             .viewport_state(&viewport_state)
             .rasterization_state(&rasterization_state)
             .multisample_state(&multisample_state)
-            // .depth_stencil_state() Currently unused
+            .depth_stencil_state(&depth_stencil)
             .color_blend_state(&color_blending_create_info)
             .dynamic_state(&dynamic_state_create_info)
             .layout(pipeline_layout)

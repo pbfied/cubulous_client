@@ -5,10 +5,10 @@ use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::render_target::RenderTarget;
 
 pub(crate) fn setup_frame_buffers(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
-                       render_target: &RenderTarget) -> Vec<vk::Framebuffer> {
+                       render_target: &RenderTarget, depth_img_view: vk::ImageView) -> Vec<vk::Framebuffer> {
     let mut frame_buffers: Vec<vk::Framebuffer> = Vec::with_capacity(render_target.image_views.len());
     for v in render_target.image_views.iter() {
-        let image_slice = [*v];
+        let image_slice = [*v, depth_img_view];
         let create_info = vk::FramebufferCreateInfo::default()
             .render_pass(render_pass)
             .attachments(&image_slice)

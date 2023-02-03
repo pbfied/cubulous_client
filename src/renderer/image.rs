@@ -41,14 +41,27 @@ pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_l
     (texture_image, texture_mem)
 }
 
+fn has_stencil_component(format: vk::Format) -> bool {
+    format == vk::Format::D32_SFLOAT_S8_UINT || format == vk::Format::D24_UNORM_S8_UINT
+}
+
 pub(crate) fn transition_image_layout(logical_layer: &LogicalLayer,
                            command_pool: vk::CommandPool,
                            image: vk::Image,
                            format: vk::Format,
                            old_layout: vk::ImageLayout,
                            new_layout: vk::ImageLayout) {
+    let mut aspect_mask = vk::ImageAspectFlags::COLOR;
+    if new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
+        aspect_mask = vk::ImageAspectFlags::DEPTH;
+
+        if has_stencil_component(format) {
+            aspect_mask |= vk::ImageAspectFlags::STENCIL;
+        }
+    }
+
     let subresource_range = vk::ImageSubresourceRange::default()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .aspect_mask(aspect_mask)
         .base_mip_level(0)
         .level_count(1)
         .base_array_layer(0)
@@ -75,6 +88,14 @@ pub(crate) fn transition_image_layout(logical_layer: &LogicalLayer,
         source_stage = vk::PipelineStageFlags::TRANSFER;
         dest_stage = vk::PipelineStageFlags::FRAGMENT_SHADER;
     }
+        else if old_layout == vk::ImageLayout::UNDEFINED &&
+            new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
+            barrier = barrier.src_access_mask(vk::AccessFlags::empty())
+                .dst_access_mask(vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_READ |
+                    vk::AccessFlags::DEPTH_STENCIL_ATTACHMENT_WRITE);
+            source_stage = vk::PipelineStageFlags::TOP_OF_PIPE;
+            dest_stage = vk::PipelineStageFlags::EARLY_FRAGMENT_TESTS;
+        }
     else {
         panic!("unsupported layout transition!");
     }
@@ -125,9 +146,10 @@ pub(crate) fn copy_buffer_to_image(logical_layer: &LogicalLayer, command_pool: v
     end_single_time_commands(logical_layer, command_pool, command_buffer);
 }
 
-pub(crate) fn create_image_view(logical_layer: &LogicalLayer, image: vk::Image, format: vk::Format) -> vk::ImageView {
+pub(crate) fn create_image_view(logical_layer: &LogicalLayer, image: vk::Image, format: vk::Format,
+                                aspect_flags: vk::ImageAspectFlags) -> vk::ImageView {
     let subresource_range = vk::ImageSubresourceRange::default()
-        .aspect_mask(vk::ImageAspectFlags::COLOR)
+        .aspect_mask(aspect_flags)
         .base_mip_level(0)
         .level_count(1)
         .base_array_layer(0)
