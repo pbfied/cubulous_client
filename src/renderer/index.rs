@@ -20,11 +20,15 @@ pub(crate) struct Index {
 }
 
 impl IndexBuffer {
-    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, cmd_pool: vk::CommandPool, indices: &Index) -> IndexBuffer {
-        let data_size: vk::DeviceSize = mem::size_of_val(&indices.data) as vk::DeviceSize;
-        let index_count = indices.data.len();
+    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, cmd_pool: vk::CommandPool, indices: &Vec<u32>) -> IndexBuffer {
+        let data_size: vk::DeviceSize = (mem::size_of_val(indices.get(0).unwrap()) * indices.len()) as vk::DeviceSize;
+        let index_count = indices.len();
 
-        let (transfer_mem, transfer_buffer) = create_buffer(core, physical_layer, logical_layer, data_size, vk::BufferUsageFlags::TRANSFER_SRC,
+        let (transfer_mem, transfer_buffer) = create_buffer(core,
+                                                            physical_layer,
+                                                            logical_layer,
+                                                            data_size,
+                                                            vk::BufferUsageFlags::TRANSFER_SRC,
                       vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT).unwrap();
 
         unsafe {
@@ -33,8 +37,8 @@ impl IndexBuffer {
                             0,
                             data_size,
                             vk::MemoryMapFlags::empty())
-                .unwrap() as *mut u16;
-            dev_memory.copy_from_nonoverlapping(indices.data.as_ptr(), index_count);
+                .unwrap() as *mut u32;
+            dev_memory.copy_from_nonoverlapping(indices.as_ptr(), index_count);
             logical_layer.logical_device.unmap_memory(transfer_mem);
         }
 

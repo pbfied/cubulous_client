@@ -34,7 +34,7 @@ impl Vertex {
         [vk::VertexInputAttributeDescription {
             location: 0,
             binding: 0, // Index of the vertex binding
-            format: vk::Format::R32G32B32_SFLOAT, // Describes a vec2 of 32 bit floating point numbers, not a color
+            format: vk::Format::R32G32B32_SFLOAT, // Describes a vec3 of 32 bit floating point numbers, not a color
             offset: offset_of!(Vertex, pos) as u32 // Offset of this attribute within this binding entry
         }, vk::VertexInputAttributeDescription {
             location: 1,

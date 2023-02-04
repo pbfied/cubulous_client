@@ -32,10 +32,13 @@ use crate::renderer::render_pass::{destroy_render_pass, setup_render_pass};
 use crate::renderer::render_target::RenderTarget;
 use crate::renderer::vertex::{VertexBuffer, Vertex};
 use crate::renderer::index::{Index, IndexBuffer};
+use crate::renderer::model::load_model;
 use crate::renderer::sampler::{create_sampler, destroy_sampler};
 use crate::renderer::texture::Texture;
 use crate::renderer::ubo::UniformBuffer;
 
+const MODEL_PATH: &str = "models/viking_room.obj";
+const TEXTURE_PATH: &str = "textures/viking_room.png";
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 const VERTICES: [Vertex; 8] = [
     Vertex {
@@ -81,9 +84,7 @@ const VERTICES: [Vertex; 8] = [
     },
 ];
 
-const INDICES: Index = Index {
-    data: [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4]
-};
+const INDICES: [u32; 12] =  [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 pub struct CubulousRenderer {
     core: Core, // Windowing handles and Vk instance
@@ -105,7 +106,9 @@ pub struct CubulousRenderer {
     descriptor: Descriptor,
     texture: Texture,
     sampler: Sampler,
-    depth: Depth
+    depth: Depth,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>
 }
 
 impl CubulousRenderer {
@@ -172,11 +175,14 @@ impl CubulousRenderer {
             .level(vk::CommandBufferLevel::PRIMARY)
             .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32);
         let command_buffers = unsafe { logical_layer.logical_device.allocate_command_buffers(&buf_create_info).unwrap() };
-
-        let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &VERTICES);
-        let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &INDICES);
+        let (vertices, indices) = load_model(MODEL_PATH);
+        // let (vertices, indices) = (Vec::from(VERTICES), Vec::from(INDICES));
+        let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, vertices.as_slice());
+        let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &indices);
         let uniform_buffer = UniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
-        let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "assets/texture.jpg");
+        let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, TEXTURE_PATH);
+        // let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "textures/texture.jpg");
+
         let sampler = create_sampler(&core, &physical_layer, &logical_layer);
         let descriptor = Descriptor::new(&logical_layer, &uniform_buffer, sampler, &texture, descriptor_layout, MAX_FRAMES_IN_FLIGHT);
 
@@ -205,7 +211,9 @@ impl CubulousRenderer {
             descriptor,
             texture,
             sampler,
-            depth
+            depth,
+            vertices,
+            indices,
         }
     }
 
@@ -299,7 +307,7 @@ impl CubulousRenderer {
                                                   vk::PipelineBindPoint::GRAPHICS,
                                                   *self.raster_pipeline.pipelines.get(0).unwrap());
             self.logical_layer.logical_device.cmd_bind_vertex_buffers(command_buffer, 0, &vertex_buffers, &offsets);
-            self.logical_layer.logical_device.cmd_bind_index_buffer(command_buffer, self.index_buffer.buf, 0, vk::IndexType::UINT16);
+            self.logical_layer.logical_device.cmd_bind_index_buffer(command_buffer, self.index_buffer.buf, 0, vk::IndexType::UINT32);
             self.logical_layer.logical_device.cmd_set_viewport(command_buffer, 0, &viewports);
             self.logical_layer.logical_device.cmd_set_scissor(command_buffer, 0, &scissors);
             // self.logical_layer.logical_device.cmd_draw(command_buffer,

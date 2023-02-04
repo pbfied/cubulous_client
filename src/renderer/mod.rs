@@ -15,3 +15,4 @@ mod texture;
 mod image;
 mod sampler;
 mod depth;
+mod model;
