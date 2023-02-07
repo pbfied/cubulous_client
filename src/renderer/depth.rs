@@ -48,14 +48,14 @@ impl Depth {
         let format = find_depth_format(core, physical_layer);
         let (img, img_mem) = create_image(core, physical_layer, logical_layer,
                                           render_target.extent.width, render_target.extent.height,
-                                          format, vk::ImageTiling::OPTIMAL,
+                                          1, format, vk::ImageTiling::OPTIMAL,
                                           vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
                                           vk::MemoryPropertyFlags::DEVICE_LOCAL);
         let depth_image_view = create_image_view(logical_layer, img, format,
-                                                 vk::ImageAspectFlags::DEPTH);
+                                                 vk::ImageAspectFlags::DEPTH, 1);
         transition_image_layout(logical_layer, command_pool, img, format,
                                 vk::ImageLayout::UNDEFINED,
-                                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+                                vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL, 1);
 
         Depth {
             image: img,

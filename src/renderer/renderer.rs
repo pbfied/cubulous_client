@@ -183,7 +183,7 @@ impl CubulousRenderer {
         let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, TEXTURE_PATH);
         // let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "textures/texture.jpg");
 
-        let sampler = create_sampler(&core, &physical_layer, &logical_layer);
+        let sampler = create_sampler(&core, &physical_layer, &logical_layer, texture.mip_levels);
         let descriptor = Descriptor::new(&logical_layer, &uniform_buffer, sampler, &texture, descriptor_layout, MAX_FRAMES_IN_FLIGHT);
 
         let (image_available_sems, render_finished_sems, in_flight_fences) =

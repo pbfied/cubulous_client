@@ -4,7 +4,9 @@ use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::staging_buf::{create_buffer, find_buf_index, begin_single_time_commands, end_single_time_commands};
 
-pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_layer: &LogicalLayer, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling,
+pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_layer: &LogicalLayer,
+                           width: u32, height: u32, mip_levels: u32,
+                           format: vk::Format, tiling: vk::ImageTiling,
                 usage: vk::ImageUsageFlags, properties: vk::MemoryPropertyFlags) -> (vk::Image, vk::DeviceMemory) {
     let image_extent = vk::Extent3D::default()
         .height(height)
@@ -14,7 +16,7 @@ pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_l
     let image_info = vk::ImageCreateInfo::default()
         .flags(vk::ImageCreateFlags::empty())
         .extent(image_extent)
-        .mip_levels(1)
+        .mip_levels(mip_levels)
         .image_type(vk::ImageType::TYPE_2D)
         .array_layers(1)
         .format(format)
@@ -50,7 +52,8 @@ pub(crate) fn transition_image_layout(logical_layer: &LogicalLayer,
                            image: vk::Image,
                            format: vk::Format,
                            old_layout: vk::ImageLayout,
-                           new_layout: vk::ImageLayout) {
+                           new_layout: vk::ImageLayout,
+                                      mip_levels: u32) {
     let mut aspect_mask = vk::ImageAspectFlags::COLOR;
     if new_layout == vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL {
         aspect_mask = vk::ImageAspectFlags::DEPTH;
@@ -63,7 +66,7 @@ pub(crate) fn transition_image_layout(logical_layer: &LogicalLayer,
     let subresource_range = vk::ImageSubresourceRange::default()
         .aspect_mask(aspect_mask)
         .base_mip_level(0)
-        .level_count(1)
+        .level_count(mip_levels)
         .base_array_layer(0)
         .layer_count(1);
     let mut barrier = vk::ImageMemoryBarrier::default()
@@ -147,11 +150,11 @@ pub(crate) fn copy_buffer_to_image(logical_layer: &LogicalLayer, command_pool: v
 }
 
 pub(crate) fn create_image_view(logical_layer: &LogicalLayer, image: vk::Image, format: vk::Format,
-                                aspect_flags: vk::ImageAspectFlags) -> vk::ImageView {
+                                aspect_flags: vk::ImageAspectFlags, mip_levels: u32) -> vk::ImageView {
     let subresource_range = vk::ImageSubresourceRange::default()
         .aspect_mask(aspect_flags)
         .base_mip_level(0)
-        .level_count(1)
+        .level_count(mip_levels)
         .base_array_layer(0)
         .layer_count(1);
     let view_info = vk::ImageViewCreateInfo::default()

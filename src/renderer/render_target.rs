@@ -52,7 +52,7 @@ impl RenderTarget {
             for i in swap_chain_images {
                 unsafe {
                     image_views.push(create_image_view(logical_layer, i, surface_format,
-                                                       vk::ImageAspectFlags::COLOR));
+                                                       vk::ImageAspectFlags::COLOR, 1));
                 }
             }
 
