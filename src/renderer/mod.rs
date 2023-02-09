@@ -16,3 +16,4 @@ mod image;
 mod sampler;
 mod depth;
 mod model;
+mod color;

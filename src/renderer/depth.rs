@@ -50,7 +50,8 @@ impl Depth {
                                           render_target.extent.width, render_target.extent.height,
                                           1, format, vk::ImageTiling::OPTIMAL,
                                           vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
-                                          vk::MemoryPropertyFlags::DEVICE_LOCAL);
+                                          vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                                          physical_layer.max_msaa_samples);
         let depth_image_view = create_image_view(logical_layer, img, format,
                                                  vk::ImageAspectFlags::DEPTH, 1);
         transition_image_layout(logical_layer, command_pool, img, format,

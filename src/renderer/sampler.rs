@@ -16,9 +16,9 @@ pub(crate) fn create_sampler(core: &Core, physical_layer: &PhysicalLayer, logica
         .max_anisotropy(properties.limits.max_sampler_anisotropy)
         .border_color(vk::BorderColor::INT_OPAQUE_BLACK) // What color to paint areas not covered by the texture
         .unnormalized_coordinates(false) // true - coordinates are [0, texture extent], false - coordinates are [0, 1]
-        .compare_enable(false) // TODO
+        .compare_enable(false)
         .compare_op(vk::CompareOp::ALWAYS)
-        .mipmap_mode(vk::SamplerMipmapMode::LINEAR) // TODO
+        .mipmap_mode(vk::SamplerMipmapMode::LINEAR)
         .mip_lod_bias(0.0)
         .min_lod(0.0)
         .max_lod(mip_levels as f32);

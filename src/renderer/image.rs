@@ -7,7 +7,8 @@ use crate::renderer::staging_buf::{create_buffer, find_buf_index, begin_single_t
 pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_layer: &LogicalLayer,
                            width: u32, height: u32, mip_levels: u32,
                            format: vk::Format, tiling: vk::ImageTiling,
-                usage: vk::ImageUsageFlags, properties: vk::MemoryPropertyFlags) -> (vk::Image, vk::DeviceMemory) {
+                usage: vk::ImageUsageFlags, properties: vk::MemoryPropertyFlags,
+                           samples: vk::SampleCountFlags) -> (vk::Image, vk::DeviceMemory) {
     let image_extent = vk::Extent3D::default()
         .height(height)
         .width(width)
@@ -23,7 +24,7 @@ pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_l
         .tiling(tiling)
         .initial_layout(vk::ImageLayout::UNDEFINED)
         .usage(usage) // Sampled allows access from shader
-        .samples(vk::SampleCountFlags::TYPE_1);
+        .samples(samples);
 
     let mem_reqs: vk::MemoryRequirements;
     let texture_image: vk::Image;

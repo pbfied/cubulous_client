@@ -21,6 +21,7 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Icon, Window, WindowBuilder, WindowId},
 };
+use crate::renderer::color::Color;
 use crate::renderer::core::Core;
 use crate::renderer::depth::{Depth, find_depth_format};
 use crate::renderer::descriptor::{create_descriptor_set_layout, Descriptor};
@@ -107,6 +108,7 @@ pub struct CubulousRenderer {
     texture: Texture,
     sampler: Sampler,
     depth: Depth,
+    color: Color,
     vertices: Vec<Vertex>,
     indices: Vec<u32>
 }
@@ -159,16 +161,24 @@ impl CubulousRenderer {
         let physical_layer = PhysicalLayer::new(&core, &required_extensions).unwrap();
         let logical_layer = LogicalLayer::new(&core, &physical_layer, &required_extensions);
         let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer);
-        let render_pass = setup_render_pass(&logical_layer, &render_target, find_depth_format(&core, &physical_layer));
+        let render_pass = setup_render_pass(&logical_layer, &render_target,
+                                            find_depth_format(&core, &physical_layer),
+                                            physical_layer.max_msaa_samples);
         let descriptor_layout = create_descriptor_set_layout(&logical_layer);
-        let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass, descriptor_layout);
+        let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass,
+                                                  descriptor_layout, physical_layer.max_msaa_samples);
         let pool_create_info = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(physical_layer.family_index);
-        let command_pool = unsafe { logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap() };
+        let command_pool = unsafe {
+            logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap()
+        };
 
         let depth = Depth::new(&core, &physical_layer, &logical_layer, &render_target, command_pool);
-        let frame_buffers = setup_frame_buffers(&logical_layer, render_pass, &render_target, depth.view);
+        let color = Color::new(&core, &physical_layer, &logical_layer, &render_target);
+        let frame_buffers = setup_frame_buffers(&logical_layer, render_pass,
+                                                &render_target, depth.view,
+                                                color.view);
 
         let buf_create_info = vk::CommandBufferAllocateInfo::default()
             .command_pool(command_pool)
@@ -212,6 +222,7 @@ impl CubulousRenderer {
             texture,
             sampler,
             depth,
+            color,
             vertices,
             indices,
         }
@@ -385,7 +396,7 @@ impl CubulousRenderer {
 
     fn cleanup_swap_chain(&self) {
         self.logical_layer.wait_idle();
-
+        self.color.destroy(&self.logical_layer);
         self.depth.destroy(&self.logical_layer);
         destroy_frame_buffers(&self.logical_layer, &self.frame_buffers);
         self.render_target.destroy(&self.logical_layer);
@@ -393,10 +404,13 @@ impl CubulousRenderer {
 
     fn recreate_swap_chain(&mut self) {
         self.cleanup_swap_chain();
-
-        self.depth = Depth::new(&self.core, &self.physical_layer, &self.logical_layer, &self.render_target, self.command_pool);
+        self.color = Color::new(&self.core, &self.physical_layer, &self.logical_layer, &self.render_target);
+        self.depth = Depth::new(&self.core, &self.physical_layer, &self.logical_layer,
+                                &self.render_target, self.command_pool);
         self.render_target = RenderTarget::new(&self.core, &self.physical_layer, &self.logical_layer);
-        self.frame_buffers = setup_frame_buffers(&self.logical_layer, self.render_pass, &self.render_target, self.depth.view);
+        self.frame_buffers = setup_frame_buffers(&self.logical_layer, self.render_pass,
+                                                 &self.render_target, self.depth.view,
+                                                 self.color.view);
     }
 
     fn window_id(&self) -> WindowId {

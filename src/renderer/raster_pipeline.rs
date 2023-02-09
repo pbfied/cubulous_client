@@ -65,7 +65,8 @@ pub(crate) struct RasterPipeline {
 }
 
 impl RasterPipeline {
-    pub(crate) fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass, layout: vk::DescriptorSetLayout) -> RasterPipeline {
+    pub(crate) fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
+                      layout: vk::DescriptorSetLayout, msaa_samples: vk::SampleCountFlags) -> RasterPipeline {
         fn setup_pipeline_stages(shader_modules: &Vec<vk::ShaderModule>) -> Vec<vk::PipelineShaderStageCreateInfo> {
             // Reminder that shader modules are in [vert, frag] order
             let create_bits = [vk::ShaderStageFlags::VERTEX,
@@ -116,9 +117,9 @@ impl RasterPipeline {
             .depth_bias_slope_factor(0.0);
 
         let multisample_state = vk::PipelineMultisampleStateCreateInfo::default()
-            .sample_shading_enable(false) // Disabled for now
-            .rasterization_samples(vk::SampleCountFlags::TYPE_1)
-            .min_sample_shading(1.0)
+            .sample_shading_enable(true) // Disabled for now
+            .rasterization_samples(msaa_samples)
+            .min_sample_shading(0.2)
             // .sample_mask() Leave NULL
             .alpha_to_coverage_enable(false)
             .alpha_to_one_enable(false);

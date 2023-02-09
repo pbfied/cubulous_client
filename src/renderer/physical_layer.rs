@@ -8,7 +8,38 @@ pub(crate) struct PhysicalLayer {
     pub(crate)physical_device: vk::PhysicalDevice,
     pub(crate) family_index: u32,
     pub(crate) supported_surface_formats: Vec<vk::SurfaceFormatKHR>,
-    pub(crate) present_modes: Vec<vk::PresentModeKHR>
+    pub(crate) present_modes: Vec<vk::PresentModeKHR>,
+    pub(crate) max_msaa_samples: vk::SampleCountFlags
+}
+
+fn get_max_usable_sample_count(properties: &vk::PhysicalDeviceProperties) -> vk::SampleCountFlags {
+    let counts = properties.limits.framebuffer_color_sample_counts &
+        properties.limits.framebuffer_depth_sample_counts;
+
+    let mut retval: vk::SampleCountFlags;
+    if (counts & vk::SampleCountFlags::TYPE_64) == vk::SampleCountFlags::TYPE_64 {
+        retval = vk::SampleCountFlags::TYPE_64;
+    }
+    else if (counts & vk::SampleCountFlags::TYPE_32) == vk::SampleCountFlags::TYPE_32 {
+        retval = vk::SampleCountFlags::TYPE_32;
+    }
+    else if (counts & vk::SampleCountFlags::TYPE_16) == vk::SampleCountFlags::TYPE_16 {
+        retval = vk::SampleCountFlags::TYPE_16;
+    }
+    else if (counts & vk::SampleCountFlags::TYPE_8) == vk::SampleCountFlags::TYPE_8 {
+        retval = vk::SampleCountFlags::TYPE_8;
+    }
+    else if (counts & vk::SampleCountFlags::TYPE_4) == vk::SampleCountFlags::TYPE_4 {
+        retval = vk::SampleCountFlags::TYPE_4;
+    }
+    else if (counts & vk::SampleCountFlags::TYPE_2) == vk::SampleCountFlags::TYPE_2 {
+        retval = vk::SampleCountFlags::TYPE_2;
+    }
+    else {
+        retval = vk::SampleCountFlags::TYPE_1;
+    }
+
+    retval
 }
 
 impl PhysicalLayer {
@@ -52,6 +83,7 @@ impl PhysicalLayer {
         let mut dev_idx: usize = 0;
         let mut present_modes: Vec<vk::PresentModeKHR> = vec![];
         let mut surface_formats: Vec<vk::SurfaceFormatKHR> = vec![];
+        let mut max_msaa_samples: vk::SampleCountFlags = vk::SampleCountFlags::TYPE_1;
 
         // For each physical device
         for (p_idx, device) in physical_devices.iter().enumerate() {
@@ -116,6 +148,7 @@ impl PhysicalLayer {
             {
                 dev_found = true;
                 dev_idx = p_idx;
+                max_msaa_samples = get_max_usable_sample_count(&dev_properties);
                 break; // Done
             }
         }
@@ -125,7 +158,8 @@ impl PhysicalLayer {
                 physical_device: physical_devices[dev_idx],
                 family_index: queue_family_idx,
                 present_modes,
-                supported_surface_formats: surface_formats
+                supported_surface_formats: surface_formats,
+                max_msaa_samples
             };
             Some(physical_dependencies)
         } else {

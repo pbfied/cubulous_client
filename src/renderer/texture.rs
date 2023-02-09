@@ -174,7 +174,8 @@ impl Texture {
                                                         vk::ImageUsageFlags::TRANSFER_DST |
                                                             vk::ImageUsageFlags::TRANSFER_SRC |
                                                             vk::ImageUsageFlags::SAMPLED,
-                                                        vk::MemoryPropertyFlags::DEVICE_LOCAL);
+                                                        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+                                                        vk::SampleCountFlags::TYPE_1);
         transition_image_layout(logical_layer, command_pool, texture_image,
                                 vk::Format::R8G8B8A8_SRGB, vk::ImageLayout::UNDEFINED,
                                 vk::ImageLayout::TRANSFER_DST_OPTIMAL, mip_levels);
