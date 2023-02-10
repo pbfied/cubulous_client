@@ -21,22 +21,25 @@ use winit::{
     event_loop::{ControlFlow, EventLoop},
     window::{Icon, Window, WindowBuilder, WindowId},
 };
-use crate::renderer::color::Color;
-use crate::renderer::core::Core;
-use crate::renderer::depth::{Depth, find_depth_format};
-use crate::renderer::descriptor::{create_descriptor_set_layout, Descriptor};
-use crate::renderer::frame_buffers::{destroy_frame_buffers, setup_frame_buffers};
-use crate::renderer::logical_layer::LogicalLayer;
-use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::raster_pipeline::RasterPipeline;
-use crate::renderer::render_pass::{destroy_render_pass, setup_render_pass};
-use crate::renderer::render_target::RenderTarget;
-use crate::renderer::vertex::{VertexBuffer, Vertex};
-use crate::renderer::index::{Index, IndexBuffer};
-use crate::renderer::model::load_model;
-use crate::renderer::sampler::{create_sampler, destroy_sampler};
-use crate::renderer::texture::Texture;
-use crate::renderer::ubo::UniformBuffer;
+
+use cubulous_client::renderer::{
+    color::Color,
+    core::Core,
+    depth::{Depth, find_depth_format},
+    descriptor::{create_descriptor_set_layout, Descriptor},
+    frame_buffers::{destroy_frame_buffers, setup_frame_buffers},
+    logical_layer::LogicalLayer,
+    physical_layer::PhysicalLayer,
+    raster_pipeline::RasterPipeline,
+    render_pass::{destroy_render_pass, setup_render_pass},
+    render_target::RenderTarget,
+    vertex::{VertexBuffer, Vertex},
+    index::{Index, IndexBuffer},
+    model::load_model,
+    sampler::{create_sampler, destroy_sampler},
+    texture::Texture,
+    ubo::UniformBuffer
+};
 
 const MODEL_PATH: &str = "models/viking_room.obj";
 const TEXTURE_PATH: &str = "textures/viking_room.png";
@@ -87,7 +90,7 @@ const VERTICES: [Vertex; 8] = [
 
 const INDICES: [u32; 12] =  [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
-pub struct CubulousRenderer {
+pub struct RasterRenderer {
     core: Core, // Windowing handles and Vk instance
     physical_layer: PhysicalLayer, // Physical device handle and derived properties
     logical_layer: LogicalLayer, // Logical device and logical queue
@@ -113,8 +116,8 @@ pub struct CubulousRenderer {
     indices: Vec<u32>
 }
 
-impl CubulousRenderer {
-    pub fn new(ev_loop: &EventLoop<()>) -> CubulousRenderer {
+impl RasterRenderer {
+    pub fn new(ev_loop: &EventLoop<()>) -> RasterRenderer {
         fn setup_command_pool(logical_layer: &LogicalLayer, physical_layer: &PhysicalLayer) -> vk::CommandPool {
             let create_info = vk::CommandPoolCreateInfo::default()
                 .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
@@ -201,7 +204,7 @@ impl CubulousRenderer {
 
         let current_frame = 0;
 
-        CubulousRenderer {
+        RasterRenderer {
             core,
             physical_layer,
             logical_layer,
@@ -437,7 +440,7 @@ impl CubulousRenderer {
     }
 }
 
-impl Drop for CubulousRenderer {
+impl Drop for RasterRenderer {
     fn drop(&mut self) {
         self.cleanup_swap_chain();
         destroy_sampler(&self.logical_layer, self.sampler);
@@ -453,4 +456,17 @@ impl Drop for CubulousRenderer {
         self.logical_layer.destroy();
         self.core.destroy();
     }
+}
+
+fn hello_triangle() {
+    // Generic window setup
+    let event_loop = EventLoop::new();
+
+    let renderer = RasterRenderer::new(&event_loop);
+
+    renderer.run_blocking(event_loop);
+}
+
+fn main() {
+    hello_triangle();
 }

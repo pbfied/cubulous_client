@@ -18,7 +18,7 @@ pub(crate) struct UniformBufferObject {
     proj: Matrix4<f32>
 }
 
-pub(crate) struct  UniformBuffer {
+pub struct  UniformBuffer {
     pub(crate) data: Vec<vk::Buffer>,
     mem: Vec<vk::DeviceMemory>,
     mapped: Vec<*mut UniformBufferObject>,
@@ -26,7 +26,7 @@ pub(crate) struct  UniformBuffer {
 }
 
 impl UniformBuffer {
-    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, max_frames: usize) -> UniformBuffer {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, max_frames: usize) -> UniformBuffer {
         let buffer_size: vk::DeviceSize = mem::size_of::<UniformBufferObject>() as vk::DeviceSize;
         let start_time = Instant::now();
         let mut uniform_buffer: UniformBuffer = UniformBuffer {
@@ -59,7 +59,7 @@ impl UniformBuffer {
         uniform_buffer
     }
 
-    pub(crate) fn build_transforms(&self, render_target: &RenderTarget, current_frame: usize) {
+    pub fn build_transforms(&self, render_target: &RenderTarget, current_frame: usize) {
         let current_time = Instant::now();
         // let time = current_time.duration_since(self.start_time).as_millis() as f32 / 1000.0;
         let time = 0.0;
@@ -82,7 +82,7 @@ impl UniformBuffer {
         }
     }
 
-    pub(crate) fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, logical_layer: &LogicalLayer) {
         for (buf, mem) in self.data.iter().zip(self.mem.iter()) {
             unsafe {
                 logical_layer.logical_device.destroy_buffer(*buf, None);

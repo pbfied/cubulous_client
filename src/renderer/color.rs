@@ -5,15 +5,15 @@ use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::render_target::RenderTarget;
 
-pub(crate) struct Color {
+pub struct Color {
     image: vk::Image,
     mem: vk::DeviceMemory,
-    pub(crate) view: vk::ImageView
+    pub view: vk::ImageView
 }
 
 impl Color {
-    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                      render_target: &RenderTarget) -> Color {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
+               render_target: &RenderTarget) -> Color {
         let (img, img_mem) = create_image(core, physical_layer, logical_layer,
                                           render_target.extent.width, render_target.extent.height,
                                           1, render_target.surface_format,
@@ -32,7 +32,7 @@ impl Color {
         }
     }
 
-    pub(crate) fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, logical_layer: &LogicalLayer) {
         unsafe {
             logical_layer.logical_device.destroy_image_view(self.view, None);
             logical_layer.logical_device.destroy_image(self.image, None);

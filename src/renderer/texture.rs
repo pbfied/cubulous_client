@@ -135,16 +135,16 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
     end_single_time_commands(logical_layer, command_pool, cmd_buffer);
 }
 
-pub(crate) struct Texture {
+pub struct Texture {
     image: vk::Image,
     pub(crate) view: vk::ImageView,
     mem: vk::DeviceMemory,
-    pub(crate) mip_levels: u32
+    pub mip_levels: u32
 }
 
 impl Texture {
-    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                      command_pool: vk::CommandPool, path: &str) -> Texture {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
+               command_pool: vk::CommandPool, path: &str) -> Texture {
         let img = Reader::open(path).unwrap().decode().unwrap().to_rgba8();
         let img_bytes = img.as_bytes();
         let img_size = img.len();
@@ -204,7 +204,7 @@ impl Texture {
         }
     }
 
-    pub(crate) fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, logical_layer: &LogicalLayer) {
         unsafe {
             logical_layer.logical_device.destroy_image_view(self.view, None);
             logical_layer.logical_device.destroy_image(self.image, None);

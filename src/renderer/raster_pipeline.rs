@@ -59,14 +59,14 @@ fn setup_pipeline_layout(logical_layer: &LogicalLayer, layout: vk::DescriptorSet
     }
 }
 
-pub(crate) struct RasterPipeline {
-    pub(crate) pipeline_layout: vk::PipelineLayout,
-    pub(crate) pipelines: Vec<vk::Pipeline>
+pub struct RasterPipeline {
+    pub pipeline_layout: vk::PipelineLayout,
+    pub pipelines: Vec<vk::Pipeline>
 }
 
 impl RasterPipeline {
-    pub(crate) fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
-                      layout: vk::DescriptorSetLayout, msaa_samples: vk::SampleCountFlags) -> RasterPipeline {
+    pub fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
+               layout: vk::DescriptorSetLayout, msaa_samples: vk::SampleCountFlags) -> RasterPipeline {
         fn setup_pipeline_stages(shader_modules: &Vec<vk::ShaderModule>) -> Vec<vk::PipelineShaderStageCreateInfo> {
             // Reminder that shader modules are in [vert, frag] order
             let create_bits = [vk::ShaderStageFlags::VERTEX,
@@ -187,7 +187,7 @@ impl RasterPipeline {
         }
     }
 
-    pub(crate) fn destroy(&mut self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&mut self, logical_layer: &LogicalLayer) {
         unsafe {
             for s in self.pipelines.iter() {
                 logical_layer.logical_device.destroy_pipeline(*s, None);

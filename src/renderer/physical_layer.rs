@@ -4,12 +4,12 @@ use ash::{vk, Instance};
 
 use crate::renderer::core::Core;
 
-pub(crate) struct PhysicalLayer {
+pub struct PhysicalLayer {
     pub(crate)physical_device: vk::PhysicalDevice,
-    pub(crate) family_index: u32,
+    pub family_index: u32,
     pub(crate) supported_surface_formats: Vec<vk::SurfaceFormatKHR>,
     pub(crate) present_modes: Vec<vk::PresentModeKHR>,
-    pub(crate) max_msaa_samples: vk::SampleCountFlags
+    pub max_msaa_samples: vk::SampleCountFlags
 }
 
 fn get_max_usable_sample_count(properties: &vk::PhysicalDeviceProperties) -> vk::SampleCountFlags {

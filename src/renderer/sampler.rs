@@ -3,7 +3,7 @@ use crate::renderer::core::Core;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 
-pub(crate) fn create_sampler(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, mip_levels: u32) -> vk::Sampler {
+pub fn create_sampler(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, mip_levels: u32) -> vk::Sampler {
     let properties = unsafe { core.instance.get_physical_device_properties(physical_layer.physical_device) };
 
     let sampler_create_info = vk::SamplerCreateInfo::default()
@@ -27,7 +27,7 @@ pub(crate) fn create_sampler(core: &Core, physical_layer: &PhysicalLayer, logica
         .unwrap() }
 }
 
-pub(crate) fn destroy_sampler(logical_layer: &LogicalLayer, sampler: vk::Sampler) {
+pub fn destroy_sampler(logical_layer: &LogicalLayer, sampler: vk::Sampler) {
     unsafe { logical_layer.logical_device.destroy_sampler(sampler, None); }
 }
 

@@ -15,16 +15,16 @@ use crate::renderer::image::create_image_view;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 
-pub(crate) struct RenderTarget {
-    pub(crate) swap_loader: Swapchain,
-    pub(crate) swap_chain: vk::SwapchainKHR,
+pub struct RenderTarget {
+    pub swap_loader: Swapchain,
+    pub swap_chain: vk::SwapchainKHR,
     pub(crate) surface_format: vk::Format,
-    pub(crate) extent: vk::Extent2D,
+    pub extent: vk::Extent2D,
     pub(crate) image_views: Vec<vk::ImageView>,
 }
 
 impl RenderTarget {
-    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer) -> RenderTarget {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer) -> RenderTarget {
         fn choose_swap_extent(window: &Window, capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
             if capabilities.current_extent.width != u32::MAX {
                 capabilities.current_extent
@@ -139,7 +139,7 @@ impl RenderTarget {
         }
     }
 
-    pub(crate) fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, logical_layer: &LogicalLayer) {
         unsafe {
             for &v in self.image_views.iter() {
                 logical_layer.logical_device.destroy_image_view(v, None);

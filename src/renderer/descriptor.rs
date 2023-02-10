@@ -5,7 +5,7 @@ use crate::renderer::texture::Texture;
 use crate::renderer::ubo::{UniformBuffer, UniformBufferObject};
 
 // Use Ash builtin to destroy the descriptor set layout
-pub(crate) fn create_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
+pub fn create_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
     let transform_binding = vk::DescriptorSetLayoutBinding::default()
         .binding(0)
         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
@@ -29,15 +29,15 @@ pub(crate) fn create_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::
     }
 }
 
-pub(crate) struct Descriptor {
+pub struct Descriptor {
     pool: vk::DescriptorPool,
     layout: vk::DescriptorSetLayout,
-    pub(crate) sets: Vec<vk::DescriptorSet>
+    pub sets: Vec<vk::DescriptorSet>
 }
 
 impl Descriptor {
-    pub(crate) fn new(logical_layer: &LogicalLayer, ubo: &UniformBuffer, sampler: vk::Sampler,
-                      texture: &Texture, layout: vk::DescriptorSetLayout, max_frames: usize) -> Descriptor {
+    pub fn new(logical_layer: &LogicalLayer, ubo: &UniformBuffer, sampler: vk::Sampler,
+               texture: &Texture, layout: vk::DescriptorSetLayout, max_frames: usize) -> Descriptor {
         // Build descriptor pool
         let transform_pool_size = vk::DescriptorPoolSize::default()
             .descriptor_count(max_frames as u32)
@@ -102,7 +102,7 @@ impl Descriptor {
         }
     }
 
-    pub(crate) fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, logical_layer: &LogicalLayer) {
         unsafe {
             logical_layer.logical_device.destroy_descriptor_pool(self.pool, None);
             logical_layer.logical_device.destroy_descriptor_set_layout(self.layout, None);

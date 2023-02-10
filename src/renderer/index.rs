@@ -6,21 +6,21 @@ use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::staging_buf::*;
 
-pub(crate) struct IndexBuffer {
-    pub(crate) buf: vk::Buffer,
+pub struct IndexBuffer {
+    pub buf: vk::Buffer,
     dev_mem: vk::DeviceMemory,
     data_size: vk::DeviceSize,
-    pub(crate) index_count: u32
+    pub index_count: u32
 }
 
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]
-pub(crate) struct Index {
+pub struct Index {
     pub data: [u16; 12]
 }
 
 impl IndexBuffer {
-    pub(crate) fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, cmd_pool: vk::CommandPool, indices: &Vec<u32>) -> IndexBuffer {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, cmd_pool: vk::CommandPool, indices: &Vec<u32>) -> IndexBuffer {
         let data_size: vk::DeviceSize = (mem::size_of_val(indices.get(0).unwrap()) * indices.len()) as vk::DeviceSize;
         let index_count = indices.len();
 

@@ -9,14 +9,14 @@ use crate::renderer::staging_buf::{create_buffer, copy_buffer};
 
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]
-pub(crate) struct Vertex {
+pub struct Vertex {
     pub pos: [f32; 3],
     pub color: [f32; 3],
     pub texCoord: [f32; 2]
 }
 
-pub(crate) struct VertexBuffer {
-    pub(crate) buf: vk::Buffer,
+pub struct VertexBuffer {
+    pub buf: vk::Buffer,
     dev_mem: vk::DeviceMemory,
     data_size: vk::DeviceSize,
     pub(crate) vertex_count: u32

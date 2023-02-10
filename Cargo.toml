@@ -19,3 +19,7 @@ memoffset = "0.7.1"
 cgmath = "0.18.0"
 image = "0.24.5"
 tobj = "3.2.3"
+
+[[bin]]
+name = "raster_tutorial"
+path = "src/app/raster_renderer.rs"

@@ -4,8 +4,8 @@ use crate::renderer::depth::find_depth_format;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::render_target::RenderTarget;
 
-pub(crate) fn setup_render_pass(logical_layer: &LogicalLayer, render_target: &RenderTarget,
-                                depth_format: vk::Format, samples: vk::SampleCountFlags) -> vk::RenderPass {
+pub fn setup_render_pass(logical_layer: &LogicalLayer, render_target: &RenderTarget,
+                         depth_format: vk::Format, samples: vk::SampleCountFlags) -> vk::RenderPass {
     let attachment_desc = vk::AttachmentDescription::default() // Color attachment
         .format(render_target.surface_format) // Should match the format of swap chain images
         .samples(samples)
@@ -79,6 +79,6 @@ pub(crate) fn setup_render_pass(logical_layer: &LogicalLayer, render_target: &Re
     unsafe {logical_layer.logical_device.create_render_pass(&render_pass_create_info, None).unwrap() }
 }
 
-pub(crate) fn destroy_render_pass(logical_layer: &LogicalLayer, render_pass: vk::RenderPass) {
+pub fn destroy_render_pass(logical_layer: &LogicalLayer, render_pass: vk::RenderPass) {
     unsafe { logical_layer.logical_device.destroy_render_pass(render_pass, None) };
 }

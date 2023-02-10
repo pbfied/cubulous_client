@@ -17,14 +17,14 @@ use winit::{
 
 pub struct Core {
     entry: Entry,
-    pub(crate) window: Window,
+    pub window: Window,
     pub(crate) instance: Instance,
     pub(crate) surface: vk::SurfaceKHR,
     pub(crate) surface_loader: Surface,
 }
 
 impl Core {
-    pub(crate) fn new(ev_loop: &EventLoop<()>, required_layers: &Vec<String>) -> Core {
+    pub fn new(ev_loop: &EventLoop<()>, required_layers: &Vec<String>) -> Core {
         fn load_entry() -> Entry {
             let vk_lib_env = env::var("VK_LIB_PATH").unwrap();
             let vk_lib_path = Path::new(&vk_lib_env).join("libvulkan.so");
@@ -215,7 +215,7 @@ impl Core {
         }
     }
 
-    pub(crate) fn destroy(&self) {
+    pub fn destroy(&self) {
         unsafe {
             self.surface_loader.destroy_surface(self.surface, None);
             self.instance.destroy_instance(None);

@@ -2,7 +2,7 @@ use tobj;
 use crate::renderer::vertex::Vertex;
 
 
-pub(crate) fn load_model(path: &str) -> (Vec<Vertex>, Vec<u32>) {
+pub fn load_model(path: &str) -> (Vec<Vertex>, Vec<u32>) {
     let mut vertex_vec: Vec<Vertex> = Vec::new();
     let mut index_vec: Vec<u32> = Vec::new();
     let (models, _) =
