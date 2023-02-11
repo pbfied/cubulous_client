@@ -1,4 +1,5 @@
 use std::ffi::{c_char, CStr, CString};
+use std::process::id;
 
 use ash::{vk, Instance};
 
@@ -6,7 +7,8 @@ use crate::renderer::core::Core;
 
 pub struct PhysicalLayer {
     pub(crate)physical_device: vk::PhysicalDevice,
-    pub family_index: u32,
+    pub present_family_index: u32,
+    pub graphics_family_index: u32,
     pub(crate) supported_surface_formats: Vec<vk::SurfaceFormatKHR>,
     pub(crate) present_modes: Vec<vk::PresentModeKHR>,
     pub max_msaa_samples: vk::SampleCountFlags
@@ -78,7 +80,10 @@ impl PhysicalLayer {
         // - supports these logical requirements:
         //      - Graphics pipelines
         //      - Can present images to the window manager surface
-        let mut queue_family_idx = 0;
+        let mut present_family_index: u32 = 0;
+        let mut graphics_family_index: u32 = 0;
+        let mut present_family_found = false;
+        let mut graphics_family_found = false;
         let mut dev_found = false;
         let mut dev_idx: usize = 0;
         let mut present_modes: Vec<vk::PresentModeKHR> = vec![];
@@ -103,7 +108,7 @@ impl PhysicalLayer {
                     .get_physical_device_surface_present_modes(*device, core.surface).unwrap();
             }
 
-            let mut queue_found = false;
+            let mut all_queues_found = false;
             if required_physical_extensions_present(&core.instance,
                                                     *device,
                                                     required_extensions) &&
@@ -120,29 +125,40 @@ impl PhysicalLayer {
 
                 // For each Queue family associated with a given device
                 for (idx, qf) in queue_fam_enumerator {
-                    // Check for graphics support
-                    let graphics_support =
-                        (qf.queue_flags & vk::QueueFlags::GRAPHICS) == vk::QueueFlags::GRAPHICS;
-                    if graphics_support {
-                        // Check family suitability
-                        let idx_u32 = idx as u32;
-                        let surface_support: bool;
-                        unsafe {
-                            surface_support = core.surface_loader
-                                .get_physical_device_surface_support(*device, idx as u32, core.surface)
-                                .unwrap();
+                    if !graphics_family_found {
+                        // Check for graphics support
+                        let graphics_support =
+                            (qf.queue_flags & vk::QueueFlags::GRAPHICS) == vk::QueueFlags::GRAPHICS;
+                        if graphics_support {
+                            graphics_family_index = idx as u32;
+                            graphics_family_found = true;
                         }
+                    }
+
+                    if !present_family_found {
+                        let surface_support =
+                            unsafe {
+                                core.surface_loader
+                                    .get_physical_device_surface_support(*device,
+                                                                         idx as u32,
+                                                                         core.surface).unwrap()
+                            };
+
                         if surface_support {
-                            queue_family_idx = idx_u32;
-                            queue_found = true;
-                            break;
+                            present_family_index = idx as u32;
+                            present_family_found = true;
                         }
+                    }
+
+                    if present_family_found && graphics_family_found {
+                        all_queues_found = true;
+                        break;
                     }
                 }
             }
 
             // If the queue family and the device are suitable
-            if queue_found
+            if all_queues_found
                 && dev_properties.device_type == vk::PhysicalDeviceType::DISCRETE_GPU
                 && dev_features.geometry_shader != 0
             {
@@ -156,7 +172,8 @@ impl PhysicalLayer {
         if dev_found {
             let physical_dependencies = PhysicalLayer {
                 physical_device: physical_devices[dev_idx],
-                family_index: queue_family_idx,
+                present_family_index,
+                graphics_family_index,
                 present_modes,
                 supported_surface_formats: surface_formats,
                 max_msaa_samples

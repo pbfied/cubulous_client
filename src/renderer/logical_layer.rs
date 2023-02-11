@@ -1,13 +1,15 @@
 use ash::{vk, Device};
 
 use std::ffi::{c_char, CStr, CString};
+use image::imageops::unsharpen;
 
 use crate::renderer::core::Core;
 use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::render_target::RenderTarget;
 
 pub struct LogicalLayer {
-    pub logical_queue: vk::Queue,
+    pub present_queue: vk::Queue,
+    pub graphics_queue: vk::Queue,
     pub logical_device: Device
 }
 
@@ -19,28 +21,43 @@ impl LogicalLayer {
             .collect();
 
         let queue_priority: [f32; 1] = [1.0];
-        let queue_create_info = vk::DeviceQueueCreateInfo::default()
-            .queue_family_index(physical_layer.family_index)
+        let graphics_queue_create_info = vk::DeviceQueueCreateInfo::default()
+            .queue_family_index(physical_layer.graphics_family_index)
             .queue_priorities(&queue_priority);
+
+        let mut qci: Vec<vk::DeviceQueueCreateInfo> = Vec::new();
+        qci.push(graphics_queue_create_info);
+        if physical_layer.present_family_index != physical_layer.graphics_family_index {
+            qci.push(vk::DeviceQueueCreateInfo::default()
+                .queue_family_index(physical_layer.present_family_index)
+                .queue_priorities(&queue_priority));
+        }
+
         let enabled_features: vk::PhysicalDeviceFeatures;
         unsafe {
             enabled_features = core.instance.get_physical_device_features(physical_layer.physical_device);
         }
 
-        let qci_slice = [queue_create_info];
         let device_create_info = vk::DeviceCreateInfo::default()
             .enabled_extension_names(&extensions_cvec)
             .enabled_features(&enabled_features)
-            .queue_create_infos(&qci_slice);
+            .queue_create_infos(qci.as_slice());
 
         let logical_device = unsafe { core.instance.create_device(physical_layer.physical_device, &device_create_info,
                                           None).unwrap() };
 
-        let logical_queue = unsafe {
-            logical_device.get_device_queue(physical_layer.family_index, 0) };
+        let present_queue = unsafe {
+            logical_device
+                .get_device_queue(physical_layer.present_family_index, 0)
+        };
+        let graphics_queue = unsafe {
+            logical_device
+                .get_device_queue(physical_layer.graphics_family_index, 0)
+        };
 
         LogicalLayer {
-            logical_queue,
+            present_queue,
+            graphics_queue,
             logical_device
         }
     }

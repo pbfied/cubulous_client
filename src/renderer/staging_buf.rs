@@ -79,8 +79,8 @@ pub(crate) fn end_single_time_commands(logical_layer: &LogicalLayer, command_poo
         .command_buffers(&command_buffers)];
 
     unsafe {
-        logical_layer.logical_device.queue_submit(logical_layer.logical_queue, &submit_info, vk::Fence::null()).unwrap();
-        logical_layer.logical_device.queue_wait_idle(logical_layer.logical_queue).unwrap();
+        logical_layer.logical_device.queue_submit(logical_layer.graphics_queue, &submit_info, vk::Fence::null()).unwrap();
+        logical_layer.logical_device.queue_wait_idle(logical_layer.graphics_queue).unwrap();
         logical_layer.logical_device.free_command_buffers(command_pool, &command_buffers);
     }
 }

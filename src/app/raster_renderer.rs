@@ -118,23 +118,6 @@ pub struct RasterRenderer {
 
 impl RasterRenderer {
     pub fn new(ev_loop: &EventLoop<()>) -> RasterRenderer {
-        fn setup_command_pool(logical_layer: &LogicalLayer, physical_layer: &PhysicalLayer) -> vk::CommandPool {
-            let create_info = vk::CommandPoolCreateInfo::default()
-                .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-                .queue_family_index(physical_layer.family_index);
-
-            unsafe { logical_layer.logical_device.create_command_pool(&create_info, None).unwrap() }
-        }
-
-        fn setup_command_buffers(logical_layer: &LogicalLayer, command_pool: vk::CommandPool) -> Vec<vk::CommandBuffer> {
-            let create_info = vk::CommandBufferAllocateInfo::default()
-                .command_pool(command_pool)
-                .level(vk::CommandBufferLevel::PRIMARY)
-                .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32);
-
-            unsafe { logical_layer.logical_device.allocate_command_buffers(&create_info).unwrap() }
-        }
-
         fn setup_sync_objects(logical_layer: &LogicalLayer) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>) {
             let sem_create_info = vk::SemaphoreCreateInfo::default();
             let fence_create_info = vk::FenceCreateInfo::default()
@@ -172,7 +155,7 @@ impl RasterRenderer {
                                                   descriptor_layout, physical_layer.max_msaa_samples);
         let pool_create_info = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
-            .queue_family_index(physical_layer.family_index);
+            .queue_family_index(physical_layer.graphics_family_index);
         let command_pool = unsafe {
             logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap()
         };
@@ -382,9 +365,9 @@ impl RasterRenderer {
                                                      vk::CommandBufferResetFlags::empty())
                 .unwrap();
             self.record_command_buffer(next_image_idx);
-            self.logical_layer.logical_device.queue_submit(self.logical_layer.logical_queue, &submit_array, *self.in_flight_fences.get(self.current_frame).unwrap()).unwrap();
+            self.logical_layer.logical_device.queue_submit(self.logical_layer.graphics_queue, &submit_array, *self.in_flight_fences.get(self.current_frame).unwrap()).unwrap();
 
-            match self.render_target.swap_loader.queue_present(self.logical_layer.logical_queue, &present_info)
+            match self.render_target.swap_loader.queue_present(self.logical_layer.present_queue, &present_info)
             {
                 Err(r) => match r {
                     vk::Result::ERROR_OUT_OF_DATE_KHR | vk::Result::SUBOPTIMAL_KHR => { self.recreate_swap_chain() },
