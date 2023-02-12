@@ -16,3 +16,4 @@ pub mod sampler;
 pub mod depth;
 pub mod model;
 pub mod color;
+pub mod renderer;

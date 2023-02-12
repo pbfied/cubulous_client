@@ -23,3 +23,7 @@ tobj = "3.2.3"
 [[bin]]
 name = "raster_tutorial"
 path = "src/app/raster_renderer.rs"
+
+[[bin]]
+name = "rt_tutorial"
+path = "src/app/rt_renderer.rs"
