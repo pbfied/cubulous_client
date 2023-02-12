@@ -1,14 +1,9 @@
 use num::clamp;
 
 use ash::{vk};
-use ash::extensions::khr::{Surface, Swapchain};
+use ash::extensions::khr::Swapchain;
 
-use winit::{
-    dpi::LogicalSize,
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Icon, Window, WindowBuilder, WindowId},
-};
+use winit::window::Window;
 
 use crate::renderer::core::Core;
 use crate::renderer::image::create_image_view;
@@ -50,10 +45,9 @@ impl RenderTarget {
 
             let mut image_views: Vec<vk::ImageView> = Vec::new();
             for i in swap_chain_images {
-                unsafe {
-                    image_views.push(create_image_view(logical_layer, i, surface_format,
-                                                       vk::ImageAspectFlags::COLOR, 1));
-                }
+                image_views.push(create_image_view(logical_layer, i, surface_format,
+                                                       vk::ImageAspectFlags::COLOR,
+                                                   1));
             }
 
             return image_views;

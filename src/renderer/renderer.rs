@@ -1,12 +1,9 @@
 use std::ffi::CString;
 use ash::vk;
-use winit::event::{Event, WindowEvent};
-use winit::event_loop::{ControlFlow, EventLoop};
-use winit::window::WindowId;
+use winit::event_loop::EventLoop;
 use crate::renderer::core::Core;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::render_target::RenderTarget;
 
 pub struct Renderer {
     pub core: Core, // Windowing handles and Vk instance
@@ -18,28 +15,28 @@ pub struct Renderer {
     pub current_frame: usize
 }
 
+pub fn setup_sync_objects(logical_layer: &LogicalLayer, max_frames: usize) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>) {
+    let sem_create_info = vk::SemaphoreCreateInfo::default();
+    let fence_create_info = vk::FenceCreateInfo::default()
+        .flags(vk::FenceCreateFlags::SIGNALED);
+
+    let mut image_avail_vec: Vec<vk::Semaphore> = Vec::with_capacity(max_frames);
+    let mut render_finished_vec: Vec<vk::Semaphore> = Vec::with_capacity(max_frames);
+    let mut fences_vec: Vec<vk::Fence> = Vec::with_capacity(max_frames);
+
+    for _ in 0..max_frames {
+        unsafe {
+            image_avail_vec.push(logical_layer.logical_device.create_semaphore(&sem_create_info, None).unwrap());
+            render_finished_vec.push(logical_layer.logical_device.create_semaphore(&sem_create_info, None).unwrap());
+            fences_vec.push(logical_layer.logical_device.create_fence(&fence_create_info, None).unwrap());
+        }
+    }
+
+    (image_avail_vec, render_finished_vec, fences_vec)
+}
+
 impl Renderer {
     pub fn new(ev_loop: &EventLoop<()>, max_frames: usize) -> Renderer {
-        fn setup_sync_objects(logical_layer: &LogicalLayer, max_frames: usize) -> (Vec<vk::Semaphore>, Vec<vk::Semaphore>, Vec<vk::Fence>) {
-            let sem_create_info = vk::SemaphoreCreateInfo::default();
-            let fence_create_info = vk::FenceCreateInfo::default()
-                .flags(vk::FenceCreateFlags::SIGNALED);
-
-            let mut image_avail_vec: Vec<vk::Semaphore> = Vec::with_capacity(max_frames);
-            let mut render_finished_vec: Vec<vk::Semaphore> = Vec::with_capacity(max_frames);
-            let mut fences_vec: Vec<vk::Fence> = Vec::with_capacity(max_frames);
-
-            for _ in 0..max_frames {
-                unsafe {
-                    image_avail_vec.push(logical_layer.logical_device.create_semaphore(&sem_create_info, None).unwrap());
-                    render_finished_vec.push(logical_layer.logical_device.create_semaphore(&sem_create_info, None).unwrap());
-                    fences_vec.push(logical_layer.logical_device.create_fence(&fence_create_info, None).unwrap());
-                }
-            }
-
-            (image_avail_vec, render_finished_vec, fences_vec)
-        }
-
         let required_extensions: Vec<CString> = Vec::from([
             CString::from(vk::KhrSwapchainFn::name()), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
         ]);

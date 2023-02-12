@@ -1,11 +1,9 @@
 use ash::{vk, Device};
 
-use std::ffi::{c_char, CStr, CString};
-use image::imageops::unsharpen;
+use std::ffi::{c_char, CString};
 
 use crate::renderer::core::Core;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::render_target::RenderTarget;
 
 pub struct LogicalLayer {
     pub present_queue: vk::Queue,

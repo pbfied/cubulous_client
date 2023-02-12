@@ -22,7 +22,7 @@ pub fn load_model(path: &str) -> (Vec<Vertex>, Vec<u32>) {
             vertex_vec.push(Vertex {
                 pos,
                 color,
-                texCoord: tex_cord,
+                tex_coord: tex_cord,
             });
         }
         index_vec = m.mesh.indices.clone()

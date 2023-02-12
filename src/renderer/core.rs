@@ -3,20 +3,19 @@ use std::fs::File;
 use std::ffi::{c_char, CStr, CString};
 use std::path::Path;
 
-use ash::{vk, Device, Entry, Instance};
-use ash::extensions::khr::{Surface, Swapchain};
+use ash::{vk, Entry, Instance};
+use ash::extensions::khr::Surface;
 
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds Vulkan functions
 
 use winit::{
     dpi::LogicalSize,
-    event::{Event, WindowEvent},
-    event_loop::{ControlFlow, EventLoop},
-    window::{Icon, Window, WindowBuilder, WindowId},
+    event_loop::EventLoop,
+    window::{Icon, Window, WindowBuilder},
 };
 
 pub struct Core {
-    entry: Entry,
+    _entry: Entry,
     pub window: Window,
     pub(crate) instance: Instance,
     pub(crate) surface: vk::SurfaceKHR,
@@ -207,7 +206,7 @@ impl Core {
         let surface_loader = Surface::new(&entry, &instance);
 
         Core {
-            entry,
+            _entry: entry,
             window,
             instance,
             surface,

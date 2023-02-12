@@ -1,5 +1,4 @@
 use ash::vk;
-use std::ptr;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::texture::Texture;
 use crate::renderer::ubo::{UniformBuffer, UniformBufferObject};
@@ -61,7 +60,7 @@ impl Descriptor {
         let allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(pool)
             .set_layouts(layout_vec.as_slice());
-        let mut sets: Vec<vk::DescriptorSet> = unsafe { logical_layer.logical_device.allocate_descriptor_sets(&allocate_info).unwrap() };
+        let sets: Vec<vk::DescriptorSet> = unsafe { logical_layer.logical_device.allocate_descriptor_sets(&allocate_info).unwrap() };
 
         for (set, buffer) in sets.iter().zip(ubo.data.iter()) {
             let transform_buffer_info = vk::DescriptorBufferInfo::default()

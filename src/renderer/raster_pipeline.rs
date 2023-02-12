@@ -1,4 +1,4 @@
-use std::ffi::{c_char, CStr, CString};
+use std::ffi::CStr;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::marker::PhantomData;
@@ -8,7 +8,6 @@ use ash::vk;
 use ash::vk::PipelineLayoutCreateFlags;
 
 use crate::renderer::logical_layer::LogicalLayer;
-use crate::renderer::render_target::RenderTarget;
 use crate::renderer::vertex::Vertex;
 
 fn load_shader(path: &str) -> Result<Vec<u8>, String> {

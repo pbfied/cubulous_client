@@ -1,6 +1,4 @@
-use std::ffi::{c_char, CStr, CString};
-use std::process::id;
-
+use std::ffi::{CStr, CString};
 use ash::{vk, Instance};
 
 use crate::renderer::core::Core;
@@ -18,7 +16,7 @@ fn get_max_usable_sample_count(properties: &vk::PhysicalDeviceProperties) -> vk:
     let counts = properties.limits.framebuffer_color_sample_counts &
         properties.limits.framebuffer_depth_sample_counts;
 
-    let mut retval: vk::SampleCountFlags;
+    let retval: vk::SampleCountFlags;
     if (counts & vk::SampleCountFlags::TYPE_64) == vk::SampleCountFlags::TYPE_64 {
         retval = vk::SampleCountFlags::TYPE_64;
     }

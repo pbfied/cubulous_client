@@ -2,7 +2,7 @@ use ash::vk;
 use crate::renderer::core::Core;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::staging_buf::{create_buffer, find_buf_index, begin_single_time_commands, end_single_time_commands};
+use crate::renderer::staging_buf::{find_buf_index, begin_single_time_commands, end_single_time_commands};
 
 pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_layer: &LogicalLayer,
                            width: u32, height: u32, mip_levels: u32,
@@ -78,8 +78,8 @@ pub(crate) fn transition_image_layout(logical_layer: &LogicalLayer,
         .image(image)
         .subresource_range(subresource_range)
         .dst_access_mask(vk::AccessFlags::empty());
-    let mut source_stage = vk::PipelineStageFlags::default();
-    let mut dest_stage = vk::PipelineStageFlags::empty();
+    let source_stage;
+    let dest_stage;
     if old_layout == vk::ImageLayout::UNDEFINED && new_layout == vk::ImageLayout::TRANSFER_DST_OPTIMAL {
         barrier = barrier.src_access_mask(vk::AccessFlags::empty())
             .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);

@@ -12,14 +12,12 @@ use crate::renderer::staging_buf::{create_buffer, copy_buffer};
 pub struct Vertex {
     pub pos: [f32; 3],
     pub color: [f32; 3],
-    pub texCoord: [f32; 2]
+    pub tex_coord: [f32; 2]
 }
 
 pub struct VertexBuffer {
     pub buf: vk::Buffer,
-    dev_mem: vk::DeviceMemory,
-    data_size: vk::DeviceSize,
-    pub(crate) vertex_count: u32
+    dev_mem: vk::DeviceMemory
 }
 
 impl Vertex {
@@ -46,7 +44,7 @@ impl Vertex {
             location: 2,
             binding: 0,
             format: vk::Format::R32G32_SFLOAT,
-            offset: offset_of!(Vertex, texCoord) as u32
+            offset: offset_of!(Vertex, tex_coord) as u32
         }]
     }
 }
@@ -89,9 +87,7 @@ impl VertexBuffer {
 
         let vbuf = VertexBuffer {
             buf,
-            dev_mem,
-            data_size,
-            vertex_count: vertex_count as u32
+            dev_mem
         };
 
         unsafe {

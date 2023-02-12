@@ -1,40 +1,22 @@
-use std::env;
-use std::ffi::{c_char, CStr, CString};
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
-use std::marker::PhantomData;
-use std::mem;
-use std::path::Path;
-
-use ash::{vk, Device, Entry, Instance};
-use ash::extensions::khr::{Surface, Swapchain};
+use ash::vk;
 use ash::vk::Sampler;
-use num::clamp;
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle}; // Entry holds Vulkan functions
-// vk holds Vulkan structs with no methods along with Vulkan macros
-// Instance wraps Entry functions with a winit surface and some under the hood initialization parameters
-// Device is a logical Vulkan device
 
 use winit::{
-    dpi::LogicalSize,
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
-    window::{Icon, Window, WindowBuilder, WindowId},
+    window::WindowId,
 };
 
 use cubulous_client::renderer::{
     color::Color,
-    core::Core,
     depth::{Depth, find_depth_format},
     descriptor::{create_descriptor_set_layout, Descriptor},
     frame_buffers::{destroy_frame_buffers, setup_frame_buffers},
-    logical_layer::LogicalLayer,
-    physical_layer::PhysicalLayer,
     raster_pipeline::RasterPipeline,
     render_pass::{destroy_render_pass, setup_render_pass},
     render_target::RenderTarget,
-    vertex::{VertexBuffer, Vertex},
-    index::{Index, IndexBuffer},
+    vertex::VertexBuffer,
+    index::IndexBuffer,
     model::load_model,
     sampler::{create_sampler, destroy_sampler},
     texture::Texture,
@@ -45,51 +27,51 @@ use cubulous_client::renderer::renderer::Renderer;
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 const MODEL_PATH: &str = "models/viking_room.obj";
 const TEXTURE_PATH: &str = "textures/viking_room.png";
-const VERTICES: [Vertex; 8] = [
-    Vertex {
-        pos: [-0.5, -0.5, 0.0],
-        color: [1.0, 0.0, 0.0],
-        texCoord: [1.0, 0.0]
-    },
-    Vertex {
-        pos: [0.5, -0.5, 0.0],
-        color: [0.0, 1.0, 0.0],
-        texCoord: [0.0, 0.0]
-    },
-    Vertex {
-        pos: [0.5, 0.5, 0.0],
-        color: [0.0, 0.0, 1.0],
-        texCoord: [0.0, 1.0]
-    },
-    Vertex {
-        pos: [-0.5, 0.5, 0.0],
-        color: [1.0, 1.0, 1.0],
-        texCoord: [1.0, 1.0]
-    },
-
-    Vertex {
-        pos: [-0.5, -0.5, -0.5],
-        color: [1.0, 0.0, 0.0],
-        texCoord: [1.0, 0.0]
-    },
-    Vertex {
-        pos: [0.5, -0.5, -0.5],
-        color: [0.0, 1.0, 0.0],
-        texCoord: [0.0, 0.0]
-    },
-    Vertex {
-        pos: [0.5, 0.5, -0.5],
-        color: [0.0, 0.0, 1.0],
-        texCoord: [0.0, 1.0]
-    },
-    Vertex {
-        pos: [-0.5, 0.5, -0.5],
-        color: [1.0, 1.0, 1.0],
-        texCoord: [1.0, 1.0]
-    },
-];
-
-const INDICES: [u32; 12] =  [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
+// const VERTICES: [Vertex; 8] = [
+//     Vertex {
+//         pos: [-0.5, -0.5, 0.0],
+//         color: [1.0, 0.0, 0.0],
+//         tex_coord: [1.0, 0.0]
+//     },
+//     Vertex {
+//         pos: [0.5, -0.5, 0.0],
+//         color: [0.0, 1.0, 0.0],
+//         tex_coord: [0.0, 0.0]
+//     },
+//     Vertex {
+//         pos: [0.5, 0.5, 0.0],
+//         color: [0.0, 0.0, 1.0],
+//         tex_coord: [0.0, 1.0]
+//     },
+//     Vertex {
+//         pos: [-0.5, 0.5, 0.0],
+//         color: [1.0, 1.0, 1.0],
+//         tex_coord: [1.0, 1.0]
+//     },
+//
+//     Vertex {
+//         pos: [-0.5, -0.5, -0.5],
+//         color: [1.0, 0.0, 0.0],
+//         tex_coord: [1.0, 0.0]
+//     },
+//     Vertex {
+//         pos: [0.5, -0.5, -0.5],
+//         color: [0.0, 1.0, 0.0],
+//         tex_coord: [0.0, 0.0]
+//     },
+//     Vertex {
+//         pos: [0.5, 0.5, -0.5],
+//         color: [0.0, 0.0, 1.0],
+//         tex_coord: [0.0, 1.0]
+//     },
+//     Vertex {
+//         pos: [-0.5, 0.5, -0.5],
+//         color: [1.0, 1.0, 1.0],
+//         tex_coord: [1.0, 1.0]
+//     },
+// ];
+//
+// const INDICES: [u32; 12] =  [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 pub struct RasterRenderer {
     renderer: Renderer,
@@ -106,9 +88,7 @@ pub struct RasterRenderer {
     texture: Texture,
     sampler: Sampler,
     depth: Depth,
-    color: Color,
-    vertices: Vec<Vertex>,
-    indices: Vec<u32>
+    color: Color
 }
 
 impl RasterRenderer {
@@ -169,9 +149,7 @@ impl RasterRenderer {
             texture,
             sampler,
             depth,
-            color,
-            vertices,
-            indices,
+            color
         }
     }
 

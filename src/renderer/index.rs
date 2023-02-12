@@ -9,7 +9,6 @@ use crate::renderer::staging_buf::*;
 pub struct IndexBuffer {
     pub buf: vk::Buffer,
     dev_mem: vk::DeviceMemory,
-    data_size: vk::DeviceSize,
     pub index_count: u32
 }
 
@@ -56,7 +55,6 @@ impl IndexBuffer {
         let ibuf = IndexBuffer {
             buf,
             dev_mem,
-            data_size,
             index_count: index_count as u32
         };
 

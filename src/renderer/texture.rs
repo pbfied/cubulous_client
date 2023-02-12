@@ -2,12 +2,11 @@ use std::cmp::max;
 use ash::vk;
 use ash::vk::Offset3D;
 use image::EncodableLayout;
-use image::imageops::unsharpen;
 use image::io::Reader;
 use crate::renderer::core::Core;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::staging_buf::{create_buffer, find_buf_index, begin_single_time_commands, end_single_time_commands};
+use crate::renderer::staging_buf::{create_buffer, begin_single_time_commands, end_single_time_commands};
 use crate::renderer::image::{create_image_view, create_image, copy_buffer_to_image, transition_image_layout};
 
 fn create_texture_image_view(logical_layer: &LogicalLayer, image: vk::Image, mip_levels: u32) -> vk::ImageView {
@@ -59,7 +58,7 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
                                       &[], &[barrier.clone()]);
         }
 
-        let mut src_sub_resource = vk::ImageSubresourceLayers::default()
+        let src_sub_resource = vk::ImageSubresourceLayers::default()
             .aspect_mask(vk::ImageAspectFlags::COLOR)
             .mip_level(i - 1)
             .base_array_layer(0)

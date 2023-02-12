@@ -1,7 +1,6 @@
-use ash::{vk, Device};
+use ash::vk;
 
 use crate::renderer::logical_layer::LogicalLayer;
-use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::render_target::RenderTarget;
 
 pub fn setup_frame_buffers(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
