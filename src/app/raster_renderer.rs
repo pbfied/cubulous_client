@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use ash::vk;
 use ash::vk::Sampler;
 
@@ -22,7 +23,10 @@ use cubulous_client::renderer::{
     texture::Texture,
     ubo::UniformBuffer
 };
-use cubulous_client::renderer::renderer::Renderer;
+use cubulous_client::renderer::core::Core;
+use cubulous_client::renderer::logical_layer::LogicalLayer;
+use cubulous_client::renderer::physical_layer::PhysicalLayer;
+use cubulous_client::renderer::renderer::create_common_vulkan_objs;
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 const MODEL_PATH: &str = "models/viking_room.obj";
@@ -74,7 +78,13 @@ const TEXTURE_PATH: &str = "textures/viking_room.png";
 // const INDICES: [u32; 12] =  [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4];
 
 pub struct RasterRenderer {
-    renderer: Renderer,
+    core: Core, // Windowing handles and Vk instance
+    physical_layer: PhysicalLayer, // Physical device handle and derived properties
+    logical_layer: LogicalLayer, // Logical device and logical queue
+    image_available_sems: Vec<vk::Semaphore>,
+    render_finished_sems: Vec<vk::Semaphore>,
+    in_flight_fences: Vec<vk::Fence>,
+    current_frame: usize,
     render_target: RenderTarget,
     raster_pipeline: RasterPipeline,
     render_pass: vk::RenderPass,
@@ -93,17 +103,19 @@ pub struct RasterRenderer {
 
 impl RasterRenderer {
     pub fn new(ev_loop: &EventLoop<()>) -> RasterRenderer {
-        let renderer = Renderer::new(ev_loop, MAX_FRAMES_IN_FLIGHT);
-        let core = &renderer.core;
-        let physical_layer = &renderer.physical_layer;
-        let logical_layer = &renderer.logical_layer;
-        let render_target = RenderTarget::new(core, physical_layer, logical_layer);
-
-        let render_pass = setup_render_pass(logical_layer, &render_target,
-                                            find_depth_format(core, physical_layer),
+        let required_extensions: Vec<CString> = Vec::from([
+            CString::from(vk::KhrSwapchainFn::name()), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
+        ]);
+        let required_layers: Vec<String> = Vec::from([String::from("VK_LAYER_KHRONOS_validation")]);
+        let (core, physical_layer, logical_layer, image_available_sems, 
+            render_finished_sems, in_flight_fences) = create_common_vulkan_objs(ev_loop, MAX_FRAMES_IN_FLIGHT,
+                                                                                required_extensions, required_layers);
+        let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer);
+        let render_pass = setup_render_pass(&logical_layer, &render_target,
+                                            find_depth_format(&core, &physical_layer),
                                             physical_layer.max_msaa_samples);
-        let descriptor_layout = create_descriptor_set_layout(logical_layer);
-        let raster_pipeline = RasterPipeline::new(logical_layer, render_pass,
+        let descriptor_layout = create_descriptor_set_layout(&logical_layer);
+        let raster_pipeline = RasterPipeline::new(&logical_layer, render_pass,
                                                   descriptor_layout, physical_layer.max_msaa_samples);
         let pool_create_info = vk::CommandPoolCreateInfo::default()
             .flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
@@ -112,9 +124,9 @@ impl RasterRenderer {
             logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap()
         };
 
-        let depth = Depth::new(core, physical_layer, logical_layer, &render_target, command_pool);
-        let color = Color::new(core, physical_layer, logical_layer, &render_target);
-        let frame_buffers = setup_frame_buffers(logical_layer, render_pass,
+        let depth = Depth::new(&core, &physical_layer, &logical_layer, &render_target, command_pool);
+        let color = Color::new(&core, &physical_layer, &logical_layer, &render_target);
+        let frame_buffers = setup_frame_buffers(&logical_layer, render_pass,
                                                 &render_target, depth.view,
                                                 color.view);
 
@@ -125,17 +137,24 @@ impl RasterRenderer {
         let command_buffers = unsafe { logical_layer.logical_device.allocate_command_buffers(&buf_create_info).unwrap() };
         let (vertices, indices) = load_model(MODEL_PATH);
         // let (vertices, indices) = (Vec::from(VERTICES), Vec::from(INDICES));
-        let vertex_buffer = VertexBuffer::new(core, physical_layer, logical_layer, command_pool, vertices.as_slice());
-        let index_buffer = IndexBuffer::new(core, physical_layer, logical_layer, command_pool, &indices);
-        let uniform_buffer = UniformBuffer::new(core, physical_layer, logical_layer, MAX_FRAMES_IN_FLIGHT);
-        let texture = Texture::new(core, physical_layer, logical_layer, command_pool, TEXTURE_PATH);
+        let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, vertices.as_slice());
+        let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &indices);
+        let uniform_buffer = UniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
+        let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, TEXTURE_PATH);
         // let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "textures/texture.jpg");
 
-        let sampler = create_sampler(core, physical_layer, logical_layer, texture.mip_levels);
-        let descriptor = Descriptor::new(logical_layer, &uniform_buffer, sampler, &texture, descriptor_layout, MAX_FRAMES_IN_FLIGHT);
+        let sampler = create_sampler(&core, &physical_layer, &logical_layer, texture.mip_levels);
+        let descriptor = Descriptor::new(&logical_layer, &uniform_buffer, sampler, &texture, descriptor_layout,
+                                         MAX_FRAMES_IN_FLIGHT);
 
         RasterRenderer {
-            renderer,
+            core,
+            physical_layer,
+            logical_layer,
+            image_available_sems,
+            render_finished_sems,
+            in_flight_fences,
+            current_frame: 0,
             render_target,
             raster_pipeline,
             render_pass,
@@ -154,12 +173,12 @@ impl RasterRenderer {
     }
 
     fn destroy_command_pool(&self) {
-        unsafe { self.renderer.logical_layer.logical_device.destroy_command_pool(self.command_pool, None) };
+        unsafe { self.logical_layer.logical_device.destroy_command_pool(self.command_pool, None) };
     }
 
     fn record_command_buffer(&self, image_index: u32) {
         let render_target = &self.render_target;
-        let logical_device = &self.renderer.logical_layer.logical_device;
+        let logical_device = &self.logical_layer.logical_device;
 
         // Defines a transformation from a VK image to the framebuffer
         fn setup_viewport(swap_extent: &vk::Extent2D) -> vk::Viewport {
@@ -217,7 +236,7 @@ impl RasterRenderer {
 
         let scissors = [setup_scissor(&render_target.extent)];
 
-        let command_buffer = *self.command_buffers.get(self.renderer.current_frame).unwrap();
+        let command_buffer = *self.command_buffers.get(self.current_frame).unwrap();
 
         let vertex_buffers = [self.vertex_buffer.buf];
 
@@ -244,7 +263,7 @@ impl RasterRenderer {
                                                                        vk::PipelineBindPoint::GRAPHICS,
                                                                        self.raster_pipeline.pipeline_layout,
                                                                        0,
-                                                                       &[*self.descriptor.sets.get(self.renderer.current_frame).unwrap()],
+                                                                       &[*self.descriptor.sets.get(self.current_frame).unwrap()],
                                                                        &[]);
             logical_device.cmd_draw_indexed(command_buffer, self.index_buffer.index_count, 1, 0, 0, 0);
             logical_device.cmd_end_render_pass(command_buffer);
@@ -253,24 +272,24 @@ impl RasterRenderer {
     }
 
     fn cleanup_swap_chain(&self) {
-        let logical_layer = &self.renderer.logical_layer;
-        self.renderer.logical_layer.wait_idle();
+        let logical_layer = &self.logical_layer;
+        self.logical_layer.wait_idle();
         self.color.destroy(logical_layer);
         self.depth.destroy(logical_layer);
         destroy_frame_buffers(logical_layer, &self.frame_buffers);
-        self.render_target.destroy(&self.renderer.logical_layer);
+        self.render_target.destroy(&self.logical_layer);
     }
 
     fn recreate_swap_chain(&mut self) {
         self.cleanup_swap_chain();
-        self.render_target = RenderTarget::new(&self.renderer.core, &self.renderer.physical_layer,
-                                               &self.renderer.logical_layer);
-        self.color = Color::new(&self.renderer.core, &self.renderer.physical_layer,
-                                &self.renderer.logical_layer, &self.render_target);
-        self.depth = Depth::new(&self.renderer.core, &self.renderer.physical_layer,
-                                &self.renderer.logical_layer, &self.render_target,
+        self.render_target = RenderTarget::new(&self.core, &self.physical_layer,
+                                               &self.logical_layer);
+        self.color = Color::new(&self.core, &self.physical_layer,
+                                &self.logical_layer, &self.render_target);
+        self.depth = Depth::new(&self.core, &self.physical_layer,
+                                &self.logical_layer, &self.render_target,
                                 self.command_pool);
-        self.frame_buffers = setup_frame_buffers(&self.renderer.logical_layer, self.render_pass,
+        self.frame_buffers = setup_frame_buffers(&self.logical_layer, self.render_pass,
                                                  &self.render_target,
                                                  self.depth.view, self.color.view);
     }
@@ -285,32 +304,32 @@ impl RasterRenderer {
                     event: WindowEvent::CloseRequested,
                     window_id,
                 } if window_id == self.window_id() => *control_flow = ControlFlow::Exit,
-                Event::MainEventsCleared => self.renderer.core.window.request_redraw(), // Emits a RedrawRequested event after input events end
+                Event::MainEventsCleared => self.core.window.request_redraw(), // Emits a RedrawRequested event after input events end
                 // Needed when a redraw is needed after the user resizes for example
                 Event::RedrawRequested(window_id) if window_id == self.window_id() => self.draw_frame(),
-                Event::LoopDestroyed => unsafe { self.renderer.logical_layer.logical_device.device_wait_idle().unwrap() },
+                Event::LoopDestroyed => unsafe { self.logical_layer.logical_device.device_wait_idle().unwrap() },
                 _ => (), // Similar to the "default" case of a switch statement: return void which is essentially () in Rust
             }
         });
     }
 
     fn window_id(&self) -> WindowId {
-        self.renderer.core.window.id()
+        self.core.window.id()
     }
 
     fn draw_frame(&mut self) {
-        let logical_device = &self.renderer.logical_layer.logical_device;
+        let logical_device = &self.logical_layer.logical_device;
         let render_target = &self.render_target;
-        let graphics_queue = self.renderer.logical_layer.graphics_queue;
-        let present_queue = self.renderer.logical_layer.present_queue;
-        let current_frame = self.renderer.current_frame;
+        let graphics_queue = self.logical_layer.graphics_queue;
+        let present_queue = self.logical_layer.present_queue;
+        let current_frame = self.current_frame;
 
-        let fences = [*self.renderer.in_flight_fences.get(current_frame)
+        let fences = [*self.in_flight_fences.get(current_frame)
             .unwrap()];
         let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
-        let wait_sems = [*self.renderer.image_available_sems.get(current_frame).unwrap()];
+        let wait_sems = [*self.image_available_sems.get(current_frame).unwrap()];
         let command_buffers = [*self.command_buffers.get(current_frame).unwrap()];
-        let sig_sems = [*self.renderer.render_finished_sems.get(current_frame).unwrap()];
+        let sig_sems = [*self.render_finished_sems.get(current_frame).unwrap()];
         let submit_info = vk::SubmitInfo::default()
             .wait_semaphores(&wait_sems)
             .wait_dst_stage_mask(&wait_stages)
@@ -326,7 +345,7 @@ impl RasterRenderer {
 
             let (next_image_idx, _) = match render_target.swap_loader
                 .acquire_next_image(render_target.swap_chain, u64::MAX,
-                                    *self.renderer.image_available_sems
+                                    *self.image_available_sems
                                         .get(current_frame)
                                         .unwrap(), vk::Fence::null()) {
                 Ok(img_idx) => img_idx,
@@ -343,13 +362,13 @@ impl RasterRenderer {
                 .wait_semaphores(&sig_sems)
                 .swapchains(&swap_chains)
                 .image_indices(&image_indices);
-            logical_device.reset_command_buffer(*self.command_buffers.get(self.renderer.current_frame).unwrap(),
+            logical_device.reset_command_buffer(*self.command_buffers.get(self.current_frame).unwrap(),
                                                                    vk::CommandBufferResetFlags::empty())
                 .unwrap();
             self.record_command_buffer(next_image_idx);
             logical_device.queue_submit(graphics_queue, &submit_array,
-                                        *self.renderer.in_flight_fences
-                                            .get(self.renderer.current_frame).unwrap()).unwrap();
+                                        *self.in_flight_fences
+                                            .get(self.current_frame).unwrap()).unwrap();
 
             match render_target.swap_loader.queue_present(present_queue, &present_info)
             {
@@ -361,26 +380,40 @@ impl RasterRenderer {
             }
         }
 
-        self.renderer.current_frame((current_frame + 1) % MAX_FRAMES_IN_FLIGHT);
+        self.current_frame = (current_frame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    fn destroy_sync_objects(&self) {
+        unsafe {
+            for i in self.image_available_sems.iter() {
+                self.logical_layer.logical_device.destroy_semaphore(*i, None);
+            }
+            for r in self.render_finished_sems.iter() {
+                self.logical_layer.logical_device.destroy_semaphore(*r, None);
+            }
+            for f in self.in_flight_fences.iter() {
+                self.logical_layer.logical_device.destroy_fence(*f, None);
+            }
+        }
     }
 }
 
 impl Drop for RasterRenderer {
     fn drop(&mut self) {
-        let logical_layer = &self.renderer.logical_layer;
+        let logical_layer = &self.logical_layer;
         self.cleanup_swap_chain();
-        destroy_sampler(&self.renderer.logical_layer, self.sampler);
+        destroy_sampler(&self.logical_layer, self.sampler);
         self.texture.destroy(logical_layer);
         self.descriptor.destroy(logical_layer);
         self.index_buffer.destroy(logical_layer);
         self.vertex_buffer.destroy(logical_layer);
-        self.renderer.destroy_sync_objects();
+        self.destroy_sync_objects();
         self.destroy_command_pool();
         self.raster_pipeline.destroy(logical_layer);
         self.uniform_buffer.destroy(logical_layer);
         destroy_render_pass(logical_layer, self.render_pass);
-        self.renderer.logical_layer.destroy();
-        self.renderer.core.destroy();
+        self.logical_layer.destroy();
+        self.core.destroy();
     }
 }
 

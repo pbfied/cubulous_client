@@ -17,3 +17,8 @@ pub mod depth;
 pub mod model;
 pub mod color;
 pub mod renderer;
+pub mod rt_pipeline;
+pub mod rt_descriptor;
+pub mod rt_canvas;
+pub mod rt_accel;
+pub mod rt_index;

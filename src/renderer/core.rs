@@ -17,7 +17,7 @@ use winit::{
 pub struct Core {
     _entry: Entry,
     pub window: Window,
-    pub(crate) instance: Instance,
+    pub instance: Instance,
     pub(crate) surface: vk::SurfaceKHR,
     pub(crate) surface_loader: Surface,
 }
