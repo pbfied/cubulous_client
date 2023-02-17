@@ -1,8 +1,9 @@
 use ash::vk;
 use crate::renderer::core::Core;
+use crate::renderer::gpu_buffer::find_buf_index;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::staging_buf::{find_buf_index, begin_single_time_commands, end_single_time_commands};
+use crate::renderer::single_time::{begin_single_time_commands, end_single_time_commands};
 
 pub(crate) fn create_image(core: &Core, physical_layer: &PhysicalLayer,logical_layer: &LogicalLayer,
                            width: u32, height: u32, mip_levels: u32,

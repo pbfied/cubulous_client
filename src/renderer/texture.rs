@@ -4,10 +4,11 @@ use ash::vk::Offset3D;
 use image::EncodableLayout;
 use image::io::Reader;
 use crate::renderer::core::Core;
+use crate::renderer::gpu_buffer::{create_buffer, GpuBuffer};
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::staging_buf::{create_buffer, begin_single_time_commands, end_single_time_commands};
 use crate::renderer::image::{create_image_view, create_image, copy_buffer_to_image, transition_image_layout};
+use crate::renderer::single_time::{begin_single_time_commands, end_single_time_commands};
 
 fn create_texture_image_view(logical_layer: &LogicalLayer, image: vk::Image, mip_levels: u32) -> vk::ImageView {
     create_image_view(logical_layer, image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR, mip_levels)
@@ -152,7 +153,7 @@ impl Texture {
         let (img_mem, img_buf) = create_buffer(core, physical_layer, logical_layer, img_size as vk::DeviceSize,
                                                vk::BufferUsageFlags::TRANSFER_SRC,
                                                vk::MemoryPropertyFlags::HOST_VISIBLE |
-                                                   vk::MemoryPropertyFlags::HOST_COHERENT).unwrap();
+                                                   vk::MemoryPropertyFlags::HOST_COHERENT);
         unsafe {
             let mapped = logical_layer
                 .logical_device

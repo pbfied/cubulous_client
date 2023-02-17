@@ -1,8 +1,7 @@
 use ash::vk;
 use ash::vk::DescriptorSet;
-use image::imageops::unsharpen;
 use crate::renderer::logical_layer::LogicalLayer;
-use crate::renderer::render_target::RenderTarget;
+use crate::renderer::rt_accel::RtTlas;
 use crate::renderer::rt_canvas::RtCanvas;
 
 pub fn create_per_frame_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
@@ -10,6 +9,7 @@ pub fn create_per_frame_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
         vk::DescriptorSetLayoutBinding::default()
             .binding(0)
             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
     ];
 
     let layout = vk::DescriptorSetLayoutCreateInfo::default()
@@ -26,6 +26,7 @@ pub fn create_singleton_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
         vk::DescriptorSetLayoutBinding::default()
             .binding(0)
             .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
     ];
 
     let layout = vk::DescriptorSetLayoutCreateInfo::default()
@@ -37,8 +38,9 @@ pub fn create_singleton_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
     }
 }
 
-pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, per_frame: vk::DescriptorSetLayout,
-                              singleton: vk::DescriptorSetLayout, max_frames: usize) -> Vec<DescriptorSet> {
+pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, tlas: &RtTlas, per_frame:
+                              vk::DescriptorSetLayout, singleton: vk::DescriptorSetLayout,
+                              max_frames: usize) -> (Vec<DescriptorSet>, vk::DescriptorPool) {
     let pool_sizes = [
         vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::STORAGE_IMAGE)
@@ -85,10 +87,33 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, p
         unsafe {
             logical_layer.logical_device.update_descriptor_sets(&[write_descriptor_set], &[]);
         }
-
+    }
+    let structure_slice = [tlas.acceleration_structure];
+    let mut accel_write_set = vk::WriteDescriptorSetAccelerationStructureKHR::default()
+        .acceleration_structures(&structure_slice);
+    let accel_write_descriptor_set = vk::WriteDescriptorSet::default()
+        .dst_set(descriptor_sets[max_frames])
+        .dst_binding(0)
+        .dst_array_element(0)
+        .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+        .push_next(&mut accel_write_set);
+    unsafe {
+        logical_layer.logical_device.update_descriptor_sets(&[accel_write_descriptor_set], &[]);
     }
 
-    descriptor_sets
+    (descriptor_sets, descriptor_pool)
+}
+
+pub fn destroy_descriptor_sets(logical_layer: &LogicalLayer, descriptor_set_layouts: &Vec<vk::DescriptorSetLayout>,
+                               descriptor_pool: vk::DescriptorPool) {
+    for l in descriptor_set_layouts {
+        unsafe {
+            logical_layer.logical_device.destroy_descriptor_set_layout(*l, None);
+        }
+    }
+    unsafe {
+        logical_layer.logical_device.destroy_descriptor_pool(descriptor_pool, None);
+    }
 }
 
 

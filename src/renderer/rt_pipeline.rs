@@ -8,6 +8,7 @@ use ash::extensions::khr;
 use ash::vk::Pipeline;
 use crate::renderer::core::Core;
 use crate::renderer::logical_layer::LogicalLayer;
+use crate::renderer::physical_layer::PhysicalLayer;
 
 const RAYGEN_IDX: usize = 0;
 const RAYHIT_IDX: usize = 1;
@@ -15,8 +16,13 @@ const RAYMISS_IDX: usize = 2;
 
 pub struct RtPipeline {
     instance: khr::RayTracingPipeline,
-    pipelines: Vec<Pipeline>,
-    pipeline_layout: vk::PipelineLayout
+    pub pipelines: Vec<Pipeline>,
+    pub pipeline_layout: vk::PipelineLayout
+}
+
+fn align_u32(val: u32, align: u32) -> u32 {
+    (val + (align - 1)) & !(align - 1) // Round up operation suggested on
+    // https://nvpro-samples.github.io/, since group handle size may not equal the alignment
 }
 
 fn load_shader(path: &str) -> Result<Vec<u8>, String> {
@@ -55,7 +61,8 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
 }
 
 impl RtPipeline {
-    pub fn new(core: &Core, logical_layer: &LogicalLayer, layouts: &Vec<vk::DescriptorSetLayout>) -> RtPipeline {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
+               layouts: &Vec<vk::DescriptorSetLayout>) -> RtPipeline {
         let instance = khr::RayTracingPipeline::new(&core.instance, &logical_layer.logical_device);
         let layout_create_info = vk::PipelineLayoutCreateInfo::default()
             .flags(vk::PipelineLayoutCreateFlags::empty())
@@ -111,6 +118,15 @@ impl RtPipeline {
             instance.create_ray_tracing_pipelines(vk::DeferredOperationKHR::null(), vk::PipelineCache::null(),
                                                   &create_info, None).unwrap()
         };
+
+        let rt_properties = unsafe { khr::RayTracingPipeline::get_properties(&core.instance, physical_layer.physical_device) };
+
+        // Setup shader binding tables
+        // let handles = unsafe { instance.get_ray_tracing_shader_group_handles(rt_pipeline, 0,
+        //                                                                      shader_groups.len() as u32,
+        //                                                                      (rt_properties.shader_group_handle_size  * stage_create_info.len()
+        //                                                                      ) as usize).unwrap() };
+
 
         for &s in shader_modules.iter() {
             unsafe { logical_layer.logical_device.destroy_shader_module(s, None) }

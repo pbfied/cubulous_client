@@ -5,8 +5,8 @@ use ash::vk;
 use crate::renderer::core::Core;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
-use crate::renderer::staging_buf::create_buffer;
 use cgmath::{Matrix4, Deg, Point3, Vector3, perspective};
+use crate::renderer::gpu_buffer::{create_buffer, GpuBuffer};
 use crate::renderer::render_target::RenderTarget;
 
 // Remember to align fields according to the Vulkan specification
@@ -40,7 +40,7 @@ impl UniformBuffer {
             let (buf_mem, buffer) = create_buffer(core, physical_layer, logical_layer, buffer_size,
                                                   vk::BufferUsageFlags::UNIFORM_BUFFER,
                                                   vk::MemoryPropertyFlags::HOST_COHERENT |
-                                                      vk::MemoryPropertyFlags::HOST_VISIBLE).unwrap();
+                                                      vk::MemoryPropertyFlags::HOST_VISIBLE);
             uniform_buffer.mem.push(buf_mem);
             uniform_buffer.data.push(buffer);
 

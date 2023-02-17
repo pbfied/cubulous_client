@@ -16,14 +16,13 @@ use cubulous_client::renderer::{
     raster_pipeline::RasterPipeline,
     render_pass::{destroy_render_pass, setup_render_pass},
     render_target::RenderTarget,
-    vertex::VertexBuffer,
-    index::IndexBuffer,
     model::load_model,
     sampler::{create_sampler, destroy_sampler},
     texture::Texture,
     ubo::UniformBuffer
 };
 use cubulous_client::renderer::core::Core;
+use cubulous_client::renderer::gpu_buffer::GpuBuffer;
 use cubulous_client::renderer::logical_layer::LogicalLayer;
 use cubulous_client::renderer::physical_layer::PhysicalLayer;
 use cubulous_client::renderer::renderer::create_common_vulkan_objs;
@@ -91,8 +90,8 @@ pub struct RasterRenderer {
     frame_buffers: Vec<vk::Framebuffer>,
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
-    vertex_buffer: VertexBuffer,
-    index_buffer: IndexBuffer,
+    vertex_buffer: GpuBuffer,
+    index_buffer: GpuBuffer,
     uniform_buffer: UniformBuffer,
     descriptor: Descriptor,
     texture: Texture,
@@ -137,8 +136,10 @@ impl RasterRenderer {
         let command_buffers = unsafe { logical_layer.logical_device.allocate_command_buffers(&buf_create_info).unwrap() };
         let (vertices, indices) = load_model(MODEL_PATH);
         // let (vertices, indices) = (Vec::from(VERTICES), Vec::from(INDICES));
-        let vertex_buffer = VertexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, vertices.as_slice());
-        let index_buffer = IndexBuffer::new(&core, &physical_layer, &logical_layer, command_pool, &indices);
+        let vertex_buffer = GpuBuffer::new_initialized(&core, &physical_layer, &logical_layer, command_pool,
+                                                       vk::BufferUsageFlags::VERTEX_BUFFER, vertices.as_slice());
+        let index_buffer = GpuBuffer::new_initialized(&core, &physical_layer, &logical_layer, command_pool,
+                                                       vk::BufferUsageFlags::INDEX_BUFFER, indices.as_slice());
         let uniform_buffer = UniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
         let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, TEXTURE_PATH);
         // let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "textures/texture.jpg");
@@ -265,7 +266,7 @@ impl RasterRenderer {
                                                                        0,
                                                                        &[*self.descriptor.sets.get(self.current_frame).unwrap()],
                                                                        &[]);
-            logical_device.cmd_draw_indexed(command_buffer, self.index_buffer.index_count, 1, 0, 0, 0);
+            logical_device.cmd_draw_indexed(command_buffer, self.index_buffer.item_count as u32, 1, 0, 0, 0);
             logical_device.cmd_end_render_pass(command_buffer);
             logical_device.end_command_buffer(command_buffer).unwrap();
         }

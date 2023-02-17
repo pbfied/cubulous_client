@@ -1,5 +1,6 @@
 use std::ffi::CString;
 use ash::vk;
+use ash::extensions::khr;
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::WindowId;
@@ -8,8 +9,9 @@ use cubulous_client::renderer::logical_layer::LogicalLayer;
 use cubulous_client::renderer::physical_layer::PhysicalLayer;
 use cubulous_client::renderer::render_target::RenderTarget;
 use cubulous_client::renderer::renderer::create_common_vulkan_objs;
+use cubulous_client::renderer::rt_accel::{create_acceleration_structures, RtBlas, RtTlas};
 use cubulous_client::renderer::rt_canvas::RtCanvas;
-use cubulous_client::renderer::rt_descriptor::{create_descriptor_sets, create_per_frame_descriptor_set_layout, create_singleton_descriptor_set_layout};
+use cubulous_client::renderer::rt_descriptor::{create_descriptor_sets, create_per_frame_descriptor_set_layout, create_singleton_descriptor_set_layout, destroy_descriptor_sets};
 use cubulous_client::renderer::rt_pipeline::RtPipeline;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
@@ -28,7 +30,10 @@ pub struct RtRenderer {
     descriptor_layouts: Vec<vk::DescriptorSetLayout>,
     rt_pipeline: RtPipeline,
     descriptor_sets: Vec<vk::DescriptorSet>,
-    canvas: RtCanvas
+    descriptor_pool: vk::DescriptorPool,
+    canvas: RtCanvas,
+    tlas: RtTlas,
+    blas: RtBlas
 }
 
 impl RtRenderer {
@@ -37,7 +42,7 @@ impl RtRenderer {
             CString::from(vk::KhrSwapchainFn::name()), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
             CString::from(vk::KhrRayTracingPipelineFn::name()),
             CString::from(vk::KhrAccelerationStructureFn::name()),
-            CString::from(vk::ExtIndexTypeUint8Fn::name())
+            CString::from(vk::ExtIndexTypeUint8Fn::name()) // TODO Is the deferred host operations extension required?
         ]);
         let required_layers: Vec<String> = Vec::from([String::from("VK_LAYER_KHRONOS_validation")]);
         let (core, physical_layer, logical_layer, image_available_sems, render_finished_sems,
@@ -56,7 +61,9 @@ impl RtRenderer {
             create_singleton_descriptor_set_layout(&logical_layer)]);
         let rt_pipeline = RtPipeline::new(&core, &logical_layer, &descriptor_layouts);
         let canvas = RtCanvas::new(&core, &physical_layer, &logical_layer, &render_target, MAX_FRAMES_IN_FLIGHT);
-        let descriptor_sets = create_descriptor_sets(&logical_layer, &canvas, descriptor_layouts[0],
+        let (tlas, blas) = create_acceleration_structures(&core, &physical_layer, &logical_layer, command_pool);
+        let (descriptor_sets, descriptor_pool) = create_descriptor_sets(&logical_layer, &canvas, &tlas,
+                                                                   descriptor_layouts[0],
                                                      descriptor_layouts[1], MAX_FRAMES_IN_FLIGHT);
 
         RtRenderer {
@@ -73,7 +80,10 @@ impl RtRenderer {
             descriptor_layouts,
             rt_pipeline,
             descriptor_sets,
+            descriptor_pool,
             canvas,
+            tlas,
+            blas,
         }
     }
 
@@ -81,9 +91,18 @@ impl RtRenderer {
         let logical_device = &self.logical_layer.logical_device;
         let begin_info = vk::CommandBufferBeginInfo::default();
         let command_buffer = *self.command_buffers.get(self.current_frame).unwrap();
+        let ray_instances = khr::RayTracingPipeline::new(&self.core.instance, logical_device);
 
         unsafe {
             logical_device.begin_command_buffer(command_buffer, &begin_info).unwrap();
+            logical_device.cmd_bind_pipeline(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self.rt_pipeline
+                .pipelines[0]);
+            logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
+                .rt_pipeline.pipeline_layout, 0, &[*self.descriptor_sets.get(self.current_frame).unwrap()], &[]);
+            logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
+                .rt_pipeline.pipeline_layout, 1, &[*self.descriptor_sets.get(MAX_FRAMES_IN_FLIGHT).unwrap()], &[]);
+            ray_instances.cmd_trace_rays(command_buffer, &[], &[], &[],
+                                         &[], self.render_target.extent.width, self.render_target.extent.height, 1);
             logical_device.end_command_buffer(command_buffer).unwrap();
         }
     }
@@ -199,14 +218,6 @@ impl RtRenderer {
         }
     }
 
-    fn destroy_descriptor_layouts(&self) {
-        for l in &self.descriptor_layouts {
-            unsafe {
-                self.logical_layer.logical_device.destroy_descriptor_set_layout(*l, None);
-            }
-        }
-    }
-
     fn destroy_command_pool(&self) {
         unsafe { self.logical_layer.logical_device.destroy_command_pool(self.command_pool, None) };
     }
@@ -219,7 +230,9 @@ impl Drop for RtRenderer {
         self.cleanup_swap_chain();
        // destroy_sampler(&self.logical_layer, self.sampler);
        //  self.texture.destroy(logical_layer);
-        self.destroy_descriptor_layouts();
+        destroy_descriptor_sets(&self.logical_layer, &self.descriptor_layouts, self.descriptor_pool);
+        self.tlas.destroy(logical_layer);
+        self.blas.destroy(logical_layer);
        //  self.index_buffer.destroy(logical_layer);
        //  self.vertex_buffer.destroy(logical_layer);
         self.destroy_sync_objects();
