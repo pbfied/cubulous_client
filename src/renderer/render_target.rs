@@ -2,6 +2,7 @@ use num::clamp;
 
 use ash::{vk};
 use ash::extensions::khr::Swapchain;
+use ash::vk::ImageView;
 
 use winit::window::Window;
 
@@ -19,7 +20,9 @@ pub struct RenderTarget {
 }
 
 impl RenderTarget {
-    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer) -> RenderTarget {
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, image_usage:
+    vk::ImageUsageFlags, color_format: vk::Format, color_space: Option<vk::ColorSpaceKHR>) ->
+                                                                                                        RenderTarget {
         fn choose_swap_extent(window: &Window, capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
             if capabilities.current_extent.width != u32::MAX {
                 capabilities.current_extent
@@ -66,8 +69,8 @@ impl RenderTarget {
             match physical_layer
                 .supported_surface_formats
                 .iter()
-                .find(|f|f.format == vk::Format::B8G8R8A8_SRGB &&
-                    f.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR)
+                .find(|f|f.format == color_format &&
+                    (if color_space.is_some() { f.color_space == color_space.unwrap() } else { true }) )
             {
                 Some(x) => x,
                 None => &physical_layer.supported_surface_formats[0]
@@ -102,7 +105,7 @@ impl RenderTarget {
             // families later on
             .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
 
-            .image_usage(vk::ImageUsageFlags::COLOR_ATTACHMENT) // "It is also possible that you'll
+            .image_usage(image_usage) // "It is also possible that you'll
             // render images to a separate image first to perform
             // operations like post-processing. In that case you may use a value like
             // VK_IMAGE_USAGE_TRANSFER_DST_BIT instead and use a memory operation to transfer the rendered
@@ -119,10 +122,14 @@ impl RenderTarget {
             swap_chain = swap_loader
                 .create_swapchain(&swap_create_info, None).unwrap();
         }
-        let image_views = setup_image_views(&logical_layer,
-                                            &swap_loader,
-                                            swap_chain,
-                                            surface_format.format);
+        // Image views are only needed by the raster renderer
+        let image_views = match image_usage & vk::ImageUsageFlags::COLOR_ATTACHMENT {
+            vk::ImageUsageFlags::COLOR_ATTACHMENT => setup_image_views(&logical_layer,
+                                                                       &swap_loader,
+                                                                       swap_chain,
+                                                                       surface_format.format),
+            _ => Vec::<ImageView>::new()
+        };
 
         return RenderTarget {
             swap_chain,

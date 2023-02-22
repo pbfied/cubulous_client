@@ -113,8 +113,9 @@ impl GpuBuffer {
     }
 
     pub fn new_initialized<T>(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                              cmd_pool: vk::CommandPool, flags: vk::BufferUsageFlags, items: &[T])
-        -> GpuBuffer {
+                              cmd_pool: vk::CommandPool, dst_flags: vk::BufferUsageFlags,
+                              src_flags: vk::BufferUsageFlags, items: &[T])
+                              -> GpuBuffer {
         let data_size: vk::DeviceSize = (mem::size_of::<T>() * items.len()) as vk::DeviceSize;
         let item_count = items.len();
 
@@ -122,7 +123,7 @@ impl GpuBuffer {
                                   physical_layer,
                                   logical_layer,
                                   data_size,
-                                  vk::BufferUsageFlags::TRANSFER_SRC,
+                                  vk::BufferUsageFlags::TRANSFER_SRC | src_flags,
                                   vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
 
         unsafe {
@@ -136,7 +137,7 @@ impl GpuBuffer {
             logical_layer.logical_device.unmap_memory(host_mem);
         }
 
-        let mut device_buf = GpuBuffer::new(core, physical_layer, logical_layer, data_size, flags |
+        let mut device_buf = GpuBuffer::new(core, physical_layer, logical_layer, data_size, dst_flags |
             vk::BufferUsageFlags::TRANSFER_DST);
         copy_buffer(logical_layer, cmd_pool, host_buf, device_buf.buf, data_size);
         device_buf.item_count = item_count;

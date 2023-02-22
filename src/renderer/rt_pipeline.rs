@@ -7,6 +7,7 @@ use ash::vk;
 use ash::extensions::khr;
 use ash::vk::Pipeline;
 use crate::renderer::core::Core;
+use crate::renderer::gpu_buffer::{create_buffer, GpuBuffer};
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::physical_layer::PhysicalLayer;
 
@@ -14,10 +15,20 @@ const RAYGEN_IDX: usize = 0;
 const RAYHIT_IDX: usize = 1;
 const RAYMISS_IDX: usize = 2;
 
+const RAYHIT_COUNT: usize = 1;
+const RAYMISS_COUNT: usize = 1;
+const RAYCALL_COUNT: usize = 0;
+
 pub struct RtPipeline {
     instance: khr::RayTracingPipeline,
     pub pipelines: Vec<Pipeline>,
-    pub pipeline_layout: vk::PipelineLayout
+    pub pipeline_layout: vk::PipelineLayout,
+    pub sbt_buf: vk::Buffer,
+    pub sbt_mem: vk::DeviceMemory,
+    pub raygen_addr_region: vk::StridedDeviceAddressRegionKHR,
+    pub raymiss_addr_region: vk::StridedDeviceAddressRegionKHR,
+    pub rayhit_addr_region: vk::StridedDeviceAddressRegionKHR,
+    pub raycallable_addr_region: vk::StridedDeviceAddressRegionKHR
 }
 
 fn align_u32(val: u32, align: u32) -> u32 {
@@ -39,7 +50,7 @@ fn load_shader(path: &str) -> Result<Vec<u8>, String> {
 }
 
 fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
-    let shader_paths = ["shaders/spv/rgen.spv", "shaders/spv/rhit.spv", "shaders/spv/rmiss.spv"];
+    let shader_paths = ["shaders/spv/rgen.spv", "shaders/spv/rchit.spv", "shaders/spv/rmiss.spv"];
 
     let mut shader_modules: Vec<vk::ShaderModule> = Vec::with_capacity(shader_paths.len());
     for sp in shader_paths.iter() {
@@ -61,7 +72,7 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
 }
 
 impl RtPipeline {
-    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
+    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, command_pool: vk::CommandPool,
                layouts: &Vec<vk::DescriptorSetLayout>) -> RtPipeline {
         let instance = khr::RayTracingPipeline::new(&core.instance, &logical_layer.logical_device);
         let layout_create_info = vk::PipelineLayoutCreateInfo::default()
@@ -78,9 +89,9 @@ impl RtPipeline {
                 .any_hit_shader(vk::SHADER_UNUSED_KHR),
             vk::RayTracingShaderGroupCreateInfoKHR::default()
                 .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP) // intersection
-                .any_hit_shader(RAYHIT_IDX as u32)
+                .any_hit_shader(vk::SHADER_UNUSED_KHR)
                 .general_shader(vk::SHADER_UNUSED_KHR)
-                .closest_hit_shader(vk::SHADER_UNUSED_KHR)
+                .closest_hit_shader(RAYHIT_IDX as u32)
                 .intersection_shader(vk::SHADER_UNUSED_KHR),
             vk::RayTracingShaderGroupCreateInfoKHR::default() // miss
                 .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
@@ -92,15 +103,15 @@ impl RtPipeline {
         let shader_modules = load_all_shaders(logical_layer);
         let stage_create_info = [
             vk::PipelineShaderStageCreateInfo::default()
-                .name(CStr::from_bytes_with_nul(b"rgen_main\0").unwrap())
+                .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
                 .stage(vk::ShaderStageFlags::RAYGEN_KHR)
                 .module(shader_modules[RAYGEN_IDX]),
             vk::PipelineShaderStageCreateInfo::default()
-                .name(CStr::from_bytes_with_nul(b"rhit_main\0").unwrap())
+                .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
                 .stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
                 .module(shader_modules[RAYHIT_IDX]),
             vk::PipelineShaderStageCreateInfo::default()
-                .name(CStr::from_bytes_with_nul(b"rmiss_main\0").unwrap())
+                .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
                 .stage(vk::ShaderStageFlags::MISS_KHR)
                 .module(shader_modules[RAYMISS_IDX])
             ];
@@ -121,12 +132,81 @@ impl RtPipeline {
 
         let rt_properties = unsafe { khr::RayTracingPipeline::get_properties(&core.instance, physical_layer.physical_device) };
 
-        // Setup shader binding tables
-        // let handles = unsafe { instance.get_ray_tracing_shader_group_handles(rt_pipeline, 0,
-        //                                                                      shader_groups.len() as u32,
-        //                                                                      (rt_properties.shader_group_handle_size  * stage_create_info.len()
-        //                                                                      ) as usize).unwrap() };
+        // Note that each shader table group is made up of one handle for each shader within the group
+        // Handles have alignment requirements
+        let handle_size = align_u32(rt_properties.shader_group_handle_size, rt_properties
+            .shader_group_handle_alignment);
+        // Since the group size is used to calculate the offset of the next region, each size must be a multiple of shader_group_base_alignment
+        let raygen_group_size = align_u32(handle_size, rt_properties.shader_group_base_alignment) as vk::DeviceSize;
+        let rmiss_group_size = align_u32(handle_size * RAYMISS_COUNT as u32, rt_properties
+            .shader_group_base_alignment) as vk::DeviceSize;
+        let rhit_group_size = align_u32(handle_size * RAYHIT_COUNT as u32, rt_properties.shader_group_base_alignment) as vk::DeviceSize;
+        let rcall_group_size = align_u32(handle_size * RAYCALL_COUNT as u32, rt_properties
+            .shader_group_base_alignment) as vk::DeviceSize;
+        let sbt_size = raygen_group_size + rmiss_group_size + rhit_group_size + rcall_group_size;
 
+        // Should probably replace with a device local buffer later for draw indirect calls
+        let (sbt_mem, sbt_buf) = create_buffer(core, physical_layer, logical_layer, sbt_size,
+                                               vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR |
+            vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::TRANSFER_SRC,
+                                    vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
+        let addr_info = vk::BufferDeviceAddressInfo::default()
+            .buffer(sbt_buf);
+        let sbt_buf_addr = unsafe {
+            logical_layer.logical_device.get_buffer_device_address(&addr_info)
+        };
+
+        // The Vulkan spec states that the raygen handle stride must be equal to its group size
+        let raygen_handle_stride = raygen_group_size;
+
+        let raygen_addr_region = vk::StridedDeviceAddressRegionKHR::default()
+            .size(raygen_group_size as vk::DeviceSize)
+            .device_address(sbt_buf_addr)
+            .stride(raygen_handle_stride as vk::DeviceSize);
+        let raymiss_addr_region = vk::StridedDeviceAddressRegionKHR::default()
+            .size(rmiss_group_size as vk::DeviceSize)
+            .device_address(sbt_buf_addr + raygen_group_size as vk::DeviceSize)
+            .stride(handle_size as vk::DeviceSize);
+        let rayhit_addr_region = vk::StridedDeviceAddressRegionKHR::default()
+            .size(rhit_group_size as vk::DeviceSize)
+            .device_address(sbt_buf_addr + raygen_group_size + rmiss_group_size)
+            .stride(handle_size as vk::DeviceSize);
+        let raycallable_addr_region = vk::StridedDeviceAddressRegionKHR::default()
+            .size(0);
+
+        // Apparently the handles are the raw bytes of the compiled shaders and ready for copying into the SBT?
+        let handles = unsafe { instance.get_ray_tracing_shader_group_handles(*pipelines.get(0).unwrap(), 0,
+                                                                             shader_groups.len() as u32,
+                                                                             (rt_properties.shader_group_handle_size
+                                                                                 * stage_create_info.len() as u32
+                                                                             ) as usize).unwrap() };
+
+        // Copy shaders to the shader binding table
+        unsafe {
+            let mut sbt_mapped_memory = logical_layer.logical_device
+                .map_memory(sbt_mem,
+                            0,
+                            sbt_size,
+                            vk::MemoryMapFlags::empty())
+                .unwrap() as *mut u8;
+            let mut handles_ptr = handles.as_ptr();
+            // Copy the raygen, always the first entry. Note that padding bytes are not copied
+            sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as
+                usize);
+            sbt_mapped_memory = sbt_mapped_memory.add(raygen_addr_region.stride as usize);
+            handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
+            for _ in 0..RAYMISS_COUNT {
+                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
+                handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
+                sbt_mapped_memory = sbt_mapped_memory.add(raymiss_addr_region.stride as usize);
+            }
+            for _ in 0..RAYHIT_COUNT {
+                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
+                handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
+                sbt_mapped_memory = sbt_mapped_memory.add(rayhit_addr_region.stride as usize);
+            }
+            logical_layer.logical_device.unmap_memory(sbt_mem);
+        }
 
         for &s in shader_modules.iter() {
             unsafe { logical_layer.logical_device.destroy_shader_module(s, None) }
@@ -135,7 +215,13 @@ impl RtPipeline {
         RtPipeline {
             instance,
             pipelines,
-            pipeline_layout
+            pipeline_layout,
+            sbt_buf,
+            sbt_mem,
+            raygen_addr_region,
+            raymiss_addr_region,
+            rayhit_addr_region,
+            raycallable_addr_region,
         }
     }
 
@@ -145,6 +231,8 @@ impl RtPipeline {
                 logical_layer.logical_device.destroy_pipeline(*s, None);
             }
             logical_layer.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
+            logical_layer.logical_device.destroy_buffer(self.sbt_buf, None);
+            logical_layer.logical_device.free_memory(self.sbt_mem, None);
         }
     }
 }

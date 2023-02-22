@@ -109,7 +109,9 @@ impl RasterRenderer {
         let (core, physical_layer, logical_layer, image_available_sems, 
             render_finished_sems, in_flight_fences) = create_common_vulkan_objs(ev_loop, MAX_FRAMES_IN_FLIGHT,
                                                                                 required_extensions, required_layers);
-        let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer);
+        let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer,
+                                              vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::Format::B8G8R8A8_SRGB,
+                                              Some(vk::ColorSpaceKHR::SRGB_NONLINEAR));
         let render_pass = setup_render_pass(&logical_layer, &render_target,
                                             find_depth_format(&core, &physical_layer),
                                             physical_layer.max_msaa_samples);
@@ -137,9 +139,11 @@ impl RasterRenderer {
         let (vertices, indices) = load_model(MODEL_PATH);
         // let (vertices, indices) = (Vec::from(VERTICES), Vec::from(INDICES));
         let vertex_buffer = GpuBuffer::new_initialized(&core, &physical_layer, &logical_layer, command_pool,
-                                                       vk::BufferUsageFlags::VERTEX_BUFFER, vertices.as_slice());
+                                                       vk::BufferUsageFlags::VERTEX_BUFFER,
+                                                       vk::BufferUsageFlags::empty(), vertices.as_slice());
         let index_buffer = GpuBuffer::new_initialized(&core, &physical_layer, &logical_layer, command_pool,
-                                                       vk::BufferUsageFlags::INDEX_BUFFER, indices.as_slice());
+                                                      vk::BufferUsageFlags::INDEX_BUFFER,
+                                                      vk::BufferUsageFlags::empty(), indices.as_slice());
         let uniform_buffer = UniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
         let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, TEXTURE_PATH);
         // let texture = Texture::new(&core, &physical_layer, &logical_layer, command_pool, "textures/texture.jpg");
@@ -284,7 +288,8 @@ impl RasterRenderer {
     fn recreate_swap_chain(&mut self) {
         self.cleanup_swap_chain();
         self.render_target = RenderTarget::new(&self.core, &self.physical_layer,
-                                               &self.logical_layer);
+                                               &self.logical_layer, vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                                               vk::Format::B8G8R8A8_SRGB, Some(vk::ColorSpaceKHR::SRGB_NONLINEAR));
         self.color = Color::new(&self.core, &self.physical_layer,
                                 &self.logical_layer, &self.render_target);
         self.depth = Depth::new(&self.core, &self.physical_layer,

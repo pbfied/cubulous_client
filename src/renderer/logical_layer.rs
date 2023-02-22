@@ -31,15 +31,21 @@ impl LogicalLayer {
                 .queue_priorities(&queue_priority));
         }
 
-        let enabled_features: vk::PhysicalDeviceFeatures;
+        let mut rt_features = vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
+        let mut accel_features = vk::PhysicalDeviceAccelerationStructureFeaturesKHR::default();
+        let mut buf_features = vk::PhysicalDeviceBufferDeviceAddressFeaturesEXT::default();
+        let mut features2 = vk::PhysicalDeviceFeatures2::default()
+            .push_next(&mut rt_features)
+            .push_next(&mut buf_features)
+            .push_next(&mut accel_features);
         unsafe {
-            enabled_features = core.instance.get_physical_device_features(physical_layer.physical_device);
+            core.instance.get_physical_device_features2(physical_layer.physical_device, &mut features2)
         }
 
         let device_create_info = vk::DeviceCreateInfo::default()
             .enabled_extension_names(&extensions_cvec)
-            .enabled_features(&enabled_features)
-            .queue_create_infos(qci.as_slice());
+            .queue_create_infos(qci.as_slice())
+            .push_next(&mut features2);
 
         let logical_device = unsafe { core.instance.create_device(physical_layer.physical_device, &device_create_info,
                                           None).unwrap() };

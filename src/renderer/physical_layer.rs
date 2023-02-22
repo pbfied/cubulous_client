@@ -1,5 +1,6 @@
+use std::arch::x86_64::_bextr_u32;
 use std::ffi::{CStr, CString};
-use ash::{vk, Instance};
+use ash::{vk, Instance, extensions::khr};
 
 use crate::renderer::core::Core;
 
@@ -92,9 +93,16 @@ impl PhysicalLayer {
         for (p_idx, device) in physical_devices.iter().enumerate() {
             let dev_properties: vk::PhysicalDeviceProperties;
             let dev_features: vk::PhysicalDeviceFeatures;
+            let mut rt_features: vk::PhysicalDeviceRayTracingPipelineFeaturesKHR =
+                vk::PhysicalDeviceRayTracingPipelineFeaturesKHR::default();
+            let mut buf_features = vk::PhysicalDeviceBufferDeviceAddressFeaturesEXT::default();
+            let mut features2 = vk::PhysicalDeviceFeatures2::default()
+                .push_next(&mut rt_features)
+                .push_next(&mut buf_features);
             unsafe {
                 dev_properties = core.instance.get_physical_device_properties(*device);
                 dev_features = core.instance.get_physical_device_features(*device);
+                core.instance.get_physical_device_features2(*device, &mut features2);
             }
 
             // Ensure that at least one kind of surface color/pixel format is supported
@@ -107,12 +115,10 @@ impl PhysicalLayer {
             }
 
             let mut all_queues_found = false;
-            if required_physical_extensions_present(&core.instance,
-                                                    *device,
-                                                    required_extensions) &&
-                !present_modes.is_empty() &&
-                !surface_formats.is_empty() &&
-                dev_features.sampler_anisotropy == vk::TRUE {
+            if required_physical_extensions_present(&core.instance, *device, required_extensions) &&
+                !present_modes.is_empty() && !surface_formats.is_empty() && dev_features.sampler_anisotropy ==
+                vk::TRUE && rt_features.ray_tracing_pipeline == vk::TRUE &&
+                buf_features.buffer_device_address == vk::TRUE {
                 let queue_families: Vec<vk::QueueFamilyProperties>;
                 unsafe {
                     queue_families = core.instance

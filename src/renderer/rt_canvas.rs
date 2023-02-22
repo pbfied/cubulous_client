@@ -6,7 +6,7 @@ use crate::renderer::physical_layer::PhysicalLayer;
 use crate::renderer::render_target::RenderTarget;
 
 pub struct RtCanvas {
-    images: Vec<vk::Image>,
+    pub images: Vec<vk::Image>,
     pub views: Vec<vk::ImageView>,
     mem: Vec<vk::DeviceMemory>
 }

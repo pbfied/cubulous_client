@@ -1,6 +1,7 @@
 use std::mem;
 use ash::extensions::khr::AccelerationStructure;
 use ash::vk;
+use ash::vk::FALSE;
 use image::imageops::unsharpen;
 use crate::renderer::core::Core;
 use crate::renderer::gpu_buffer::GpuBuffer;
@@ -32,15 +33,17 @@ impl RtAccel {
                        acceleration_instance: &AccelerationStructure, command_pool: vk::CommandPool,
                        indices: &[T], vertices: &[f32]) -> RtBlas {
         let index_buffer = GpuBuffer::new_initialized(core, physical_layer, logical_layer, command_pool,
-                                                  vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR |
-                                                      vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, &indices);
+                                                      vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR |
+                                                          vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                                                      vk::BufferUsageFlags::empty(), &indices);
         let index_dev_addr = vk::DeviceOrHostAddressConstKHR {
             device_address: index_buffer.get_device_address(logical_layer)
         };
         let vertex_buffer = GpuBuffer::new_initialized(core, physical_layer, logical_layer, command_pool,
-                                                   vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                                                       | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
-                                                   &vertices);
+                                                       vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                                                           | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                                                       vk::BufferUsageFlags::empty(),
+                                                       &vertices);
         let vertex_dev_addr = vk::DeviceOrHostAddressConstKHR {
             device_address: vertex_buffer.get_device_address(logical_layer)
         };
@@ -156,13 +159,15 @@ impl RtAccel {
             ];
 
             let blas_instance_buf = GpuBuffer::new_initialized(core, physical_layer, logical_layer, command_pool,
-                                                           vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                                                               | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, &blas_instances);
+                                                               vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                                                                   | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
+                                                               vk::BufferUsageFlags::empty(), &blas_instances);
             let blas_instance_addr = vk::DeviceOrHostAddressConstKHR {
                 device_address: blas_instance_buf.get_device_address(logical_layer)
             };
             let tlas_geometry_instances = vk::AccelerationStructureGeometryInstancesDataKHR::default()
-                .data(blas_instance_addr);
+                .data(blas_instance_addr)
+                .array_of_pointers(false);
             let tlas_geometry_data = vk::AccelerationStructureGeometryDataKHR {
                 instances: tlas_geometry_instances
             };
@@ -204,7 +209,7 @@ impl RtAccel {
             .buffer(tlas_buf.buf)
             .offset(0);
         let tlas = unsafe { acceleration_instance.create_acceleration_structure(&tlas_create_info, None).unwrap() };
-        tlas_build_info.dst_acceleration_structure(tlas);
+        tlas_build_info = tlas_build_info.dst_acceleration_structure(tlas);
 
         let build_range_info_l1 = [
             vk::AccelerationStructureBuildRangeInfoKHR::default()
@@ -244,7 +249,7 @@ pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLaye
     let acceleration_instance = AccelerationStructure::new(&core.instance, &logical_layer
         .logical_device);
 
-    let indices: [u8; 36] = [
+    let indices: [u16; 36] = [
         0, 1, 2, // back
         1, 3, 2,
         0, 1, 5, // top

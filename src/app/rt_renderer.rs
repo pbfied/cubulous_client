@@ -42,12 +42,16 @@ impl RtRenderer {
             CString::from(vk::KhrSwapchainFn::name()), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
             CString::from(vk::KhrRayTracingPipelineFn::name()),
             CString::from(vk::KhrAccelerationStructureFn::name()),
-            CString::from(vk::ExtIndexTypeUint8Fn::name()) // TODO Is the deferred host operations extension required?
+            CString::from(vk::KhrDeferredHostOperationsFn::name()), // Required by VK_KHR_acceleration_structure
+            CString::from(vk::ExtBufferDeviceAddressFn::name())
         ]);
         let required_layers: Vec<String> = Vec::from([String::from("VK_LAYER_KHRONOS_validation")]);
         let (core, physical_layer, logical_layer, image_available_sems, render_finished_sems,
             in_flight_fences) = create_common_vulkan_objs(ev_loop, MAX_FRAMES_IN_FLIGHT, required_extensions, required_layers);
-        let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer);
+        let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer,
+                                              // Apparently, B8G8R8A8_SRGB is incompatible with ImageUsageFlags::STORAGE
+                                              vk::ImageUsageFlags::TRANSFER_DST, vk::Format::B8G8R8A8_UNORM,
+                                              None);
         let pool_create_info = vk::CommandPoolCreateInfo::default().flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(physical_layer.graphics_family_index);
         let command_pool = unsafe { logical_layer.logical_device.create_command_pool(&pool_create_info, None).unwrap() };
@@ -59,7 +63,7 @@ impl RtRenderer {
         let current_frame: usize = 0;
         let descriptor_layouts = Vec::from([create_per_frame_descriptor_set_layout(&logical_layer),
             create_singleton_descriptor_set_layout(&logical_layer)]);
-        let rt_pipeline = RtPipeline::new(&core, &logical_layer, &descriptor_layouts);
+        let rt_pipeline = RtPipeline::new(&core, &physical_layer, &logical_layer, command_pool, &descriptor_layouts);
         let canvas = RtCanvas::new(&core, &physical_layer, &logical_layer, &render_target, MAX_FRAMES_IN_FLIGHT);
         let (tlas, blas) = create_acceleration_structures(&core, &physical_layer, &logical_layer, command_pool);
         let (descriptor_sets, descriptor_pool) = create_descriptor_sets(&logical_layer, &canvas, &tlas,
@@ -92,6 +96,44 @@ impl RtRenderer {
         let begin_info = vk::CommandBufferBeginInfo::default();
         let command_buffer = *self.command_buffers.get(self.current_frame).unwrap();
         let ray_instances = khr::RayTracingPipeline::new(&self.core.instance, logical_device);
+        let present_image = unsafe { *self.render_target.swap_loader.get_swapchain_images(self.render_target
+            .swap_chain).unwrap().get(self.current_frame).unwrap() };
+        let canvas_image = *self.canvas.images.get(self.current_frame).unwrap();
+
+        let subresource_range = vk::ImageSubresourceRange::default()
+            .base_mip_level(0)
+            .layer_count(1)
+            .level_count(1)
+            .base_array_layer(0)
+            .aspect_mask(vk::ImageAspectFlags::COLOR);
+        let canvas_image_to_dst_barrier = vk::ImageMemoryBarrier::default()
+            .image(canvas_image)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::GENERAL);
+        let present_to_dst_barrier = vk::ImageMemoryBarrier::default()
+            .image(present_image)
+            .old_layout(vk::ImageLayout::UNDEFINED)
+            .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::empty())
+            .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
+        let canvas_image_to_src_barrier = vk::ImageMemoryBarrier::default()
+            .image(canvas_image)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::SHADER_WRITE)
+            .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
+            .old_layout(vk::ImageLayout::GENERAL)
+            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+        let present_to_present_barrier = vk::ImageMemoryBarrier::default()
+            .image(present_image)
+            .subresource_range(subresource_range)
+            .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .dst_access_mask(vk::AccessFlags::empty())
+            .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
+            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR);
 
         unsafe {
             logical_device.begin_command_buffer(command_buffer, &begin_info).unwrap();
@@ -101,8 +143,24 @@ impl RtRenderer {
                 .rt_pipeline.pipeline_layout, 0, &[*self.descriptor_sets.get(self.current_frame).unwrap()], &[]);
             logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
                 .rt_pipeline.pipeline_layout, 1, &[*self.descriptor_sets.get(MAX_FRAMES_IN_FLIGHT).unwrap()], &[]);
-            ray_instances.cmd_trace_rays(command_buffer, &[], &[], &[],
-                                         &[], self.render_target.extent.width, self.render_target.extent.height, 1);
+            logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
+                                                vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
+                                                &[], &[], &[canvas_image_to_write_barrier]);
+            ray_instances.cmd_trace_rays(command_buffer, &self.rt_pipeline.raygen_addr_region,
+                                         &self.rt_pipeline.raymiss_addr_region,
+                                         &self.rt_pipeline.rayhit_addr_region,
+                                         &self.rt_pipeline.raycallable_addr_region,
+                                         self.render_target.extent.width, self.render_target.extent.height, 1);
+            logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
+                                                vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
+                                                &[], &[], &[canvas_image_to_src_barrier]);
+            logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
+                                                vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
+                                                &[], &[], &[present_to_dst_barrier]);
+            // TODO Blit image here
+            logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
+                                                vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
+                                                &[], &[], &[present_to_present_barrier]);
             logical_device.end_command_buffer(command_buffer).unwrap();
         }
     }
@@ -110,7 +168,8 @@ impl RtRenderer {
     fn recreate_swap_chain(&mut self) {
         self.cleanup_swap_chain();
         self.render_target = RenderTarget::new(&self.core, &self.physical_layer,
-                                               &self.logical_layer);
+                                               &self.logical_layer, vk::ImageUsageFlags::TRANSFER_DST,
+                                               vk::Format::B8G8R8A8_UNORM, None);
     }
 
     fn cleanup_swap_chain(&self) {
@@ -195,7 +254,8 @@ impl RtRenderer {
                     event: WindowEvent::CloseRequested,
                     window_id,
                 } if window_id == self.window_id() => *control_flow = ControlFlow::Exit,
-                Event::MainEventsCleared => self.core.window.request_redraw(), // Emits a RedrawRequested event after input events end
+          //      Event::MainEventsCleared => self.core.window.request_redraw(), // Emits a RedrawRequested event
+                // after input events end
                 // Needed when a redraw is needed after the user resizes for example
                 Event::RedrawRequested(window_id) if window_id == self.window_id() => self.draw_frame(),
                 Event::LoopDestroyed => unsafe { self.logical_layer.logical_device.device_wait_idle().unwrap() },
