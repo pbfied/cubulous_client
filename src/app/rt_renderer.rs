@@ -32,6 +32,7 @@ pub struct RtRenderer {
     descriptor_sets: Vec<vk::DescriptorSet>,
     descriptor_pool: vk::DescriptorPool,
     canvas: RtCanvas,
+    accel_instance: khr::AccelerationStructure,
     tlas: RtTlas,
     blas: RtBlas
 }
@@ -50,7 +51,11 @@ impl RtRenderer {
             in_flight_fences) = create_common_vulkan_objs(ev_loop, MAX_FRAMES_IN_FLIGHT, required_extensions, required_layers);
         let render_target = RenderTarget::new(&core, &physical_layer, &logical_layer,
                                               // Apparently, B8G8R8A8_SRGB is incompatible with ImageUsageFlags::STORAGE
-                                              vk::ImageUsageFlags::TRANSFER_DST, vk::Format::B8G8R8A8_UNORM,
+                                              // Another special note: Even though the swap chain images are not used
+                                              // as render pass attachments, the COLOR_ATTACHMENT flag is needed for
+                                              // some reason.
+                                              vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::COLOR_ATTACHMENT,
+                                              vk::Format::B8G8R8A8_UNORM,
                                               None);
         let pool_create_info = vk::CommandPoolCreateInfo::default().flags(vk::CommandPoolCreateFlags::RESET_COMMAND_BUFFER)
             .queue_family_index(physical_layer.graphics_family_index);
@@ -65,7 +70,8 @@ impl RtRenderer {
             create_singleton_descriptor_set_layout(&logical_layer)]);
         let rt_pipeline = RtPipeline::new(&core, &physical_layer, &logical_layer, command_pool, &descriptor_layouts);
         let canvas = RtCanvas::new(&core, &physical_layer, &logical_layer, &render_target, MAX_FRAMES_IN_FLIGHT);
-        let (tlas, blas) = create_acceleration_structures(&core, &physical_layer, &logical_layer, command_pool);
+        let (accel_instance, tlas, blas) = create_acceleration_structures(&core, &physical_layer, &logical_layer,
+                                                                         command_pool);
         let (descriptor_sets, descriptor_pool) = create_descriptor_sets(&logical_layer, &canvas, &tlas,
                                                                    descriptor_layouts[0],
                                                      descriptor_layouts[1], MAX_FRAMES_IN_FLIGHT);
@@ -86,6 +92,7 @@ impl RtRenderer {
             descriptor_sets,
             descriptor_pool,
             canvas,
+            accel_instance,
             tlas,
             blas,
         }
@@ -97,7 +104,7 @@ impl RtRenderer {
         let command_buffer = *self.command_buffers.get(self.current_frame).unwrap();
         let ray_instances = khr::RayTracingPipeline::new(&self.core.instance, logical_device);
         let present_image = unsafe { *self.render_target.swap_loader.get_swapchain_images(self.render_target
-            .swap_chain).unwrap().get(self.current_frame).unwrap() };
+            .swap_chain).unwrap().get(image_index as usize).unwrap() };
         let canvas_image = *self.canvas.images.get(self.current_frame).unwrap();
 
         let subresource_range = vk::ImageSubresourceRange::default()
@@ -112,28 +119,50 @@ impl RtRenderer {
             .src_access_mask(vk::AccessFlags::empty())
             .dst_access_mask(vk::AccessFlags::SHADER_WRITE)
             .old_layout(vk::ImageLayout::UNDEFINED)
-            .new_layout(vk::ImageLayout::GENERAL);
+            .new_layout(vk::ImageLayout::GENERAL)
+            .src_queue_family_index(self.physical_layer.graphics_family_index) // TODO Set up queue family ownership
+            // transfers. It's not a problem for now since the graphics and presentation families on my dev platform
+            // are the same.
+            .dst_queue_family_index(self.physical_layer.graphics_family_index);
         let present_to_dst_barrier = vk::ImageMemoryBarrier::default()
             .image(present_image)
             .old_layout(vk::ImageLayout::UNDEFINED)
             .new_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
             .subresource_range(subresource_range)
             .src_access_mask(vk::AccessFlags::empty())
-            .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE);
+            .dst_access_mask(vk::AccessFlags::TRANSFER_WRITE)
+            .src_queue_family_index(self.physical_layer.graphics_family_index)
+            .dst_queue_family_index(self.physical_layer.graphics_family_index);
         let canvas_image_to_src_barrier = vk::ImageMemoryBarrier::default()
             .image(canvas_image)
             .subresource_range(subresource_range)
             .src_access_mask(vk::AccessFlags::SHADER_WRITE)
             .dst_access_mask(vk::AccessFlags::TRANSFER_READ)
             .old_layout(vk::ImageLayout::GENERAL)
-            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL);
+            .new_layout(vk::ImageLayout::TRANSFER_SRC_OPTIMAL)
+            .src_queue_family_index(self.physical_layer.graphics_family_index)
+            .dst_queue_family_index(self.physical_layer.graphics_family_index);
         let present_to_present_barrier = vk::ImageMemoryBarrier::default()
             .image(present_image)
             .subresource_range(subresource_range)
             .src_access_mask(vk::AccessFlags::TRANSFER_WRITE)
             .dst_access_mask(vk::AccessFlags::empty())
             .old_layout(vk::ImageLayout::TRANSFER_DST_OPTIMAL)
-            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR);
+            .new_layout(vk::ImageLayout::PRESENT_SRC_KHR)
+            .src_queue_family_index(self.physical_layer.graphics_family_index)
+            .dst_queue_family_index(self.physical_layer.graphics_family_index);
+        let blit_subresource = vk::ImageSubresourceLayers::default()
+            .aspect_mask(vk::ImageAspectFlags::COLOR)
+            .base_array_layer(0)
+            .mip_level(0)
+            .layer_count(1);
+        let blit_offsets = [vk::Offset3D::default().x(0).y(0).z(0), vk::Offset3D::default().x(self.render_target
+            .extent.width as i32).y(self.render_target.extent.height as i32).z(1)];
+        let blit_region = vk::ImageBlit::default()
+            .src_subresource(blit_subresource)
+            .dst_subresource(blit_subresource)
+            .src_offsets(blit_offsets)
+            .dst_offsets(blit_offsets);
 
         unsafe {
             logical_device.begin_command_buffer(command_buffer, &begin_info).unwrap();
@@ -141,11 +170,12 @@ impl RtRenderer {
                 .pipelines[0]);
             logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
                 .rt_pipeline.pipeline_layout, 0, &[*self.descriptor_sets.get(self.current_frame).unwrap()], &[]);
+            // TODO Should probably not bind the same acceleration structure every frame
             logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
                 .rt_pipeline.pipeline_layout, 1, &[*self.descriptor_sets.get(MAX_FRAMES_IN_FLIGHT).unwrap()], &[]);
             logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
                                                 vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
-                                                &[], &[], &[canvas_image_to_write_barrier]);
+                                                &[], &[], &[canvas_image_to_dst_barrier]);
             ray_instances.cmd_trace_rays(command_buffer, &self.rt_pipeline.raygen_addr_region,
                                          &self.rt_pipeline.raymiss_addr_region,
                                          &self.rt_pipeline.rayhit_addr_region,
@@ -157,7 +187,9 @@ impl RtRenderer {
             logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
                                                 vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
                                                 &[], &[], &[present_to_dst_barrier]);
-            // TODO Blit image here
+            logical_device.cmd_blit_image(command_buffer, canvas_image, vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                                          present_image, vk::ImageLayout::TRANSFER_DST_OPTIMAL, &[blit_region],
+                                          vk::Filter::NEAREST);
             logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
                                                 vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
                                                 &[], &[], &[present_to_present_barrier]);
@@ -170,11 +202,14 @@ impl RtRenderer {
         self.render_target = RenderTarget::new(&self.core, &self.physical_layer,
                                                &self.logical_layer, vk::ImageUsageFlags::TRANSFER_DST,
                                                vk::Format::B8G8R8A8_UNORM, None);
+        self.canvas = RtCanvas::new(&self.core, &self.physical_layer, &self.logical_layer, &self.render_target,
+                                    MAX_FRAMES_IN_FLIGHT);
     }
 
     fn cleanup_swap_chain(&self) {
         self.logical_layer.wait_idle();
         self.render_target.destroy(&self.logical_layer);
+        self.canvas.destroy(&self.logical_layer);
     }
 
     fn draw_frame(&mut self) {
@@ -227,6 +262,7 @@ impl RtRenderer {
                                         *self.in_flight_fences
                                             .get(self.current_frame).unwrap()).unwrap();
 
+
             match self.render_target.swap_loader.queue_present(present_queue, &present_info)
             {
                 Err(r) => match r {
@@ -254,7 +290,7 @@ impl RtRenderer {
                     event: WindowEvent::CloseRequested,
                     window_id,
                 } if window_id == self.window_id() => *control_flow = ControlFlow::Exit,
-          //      Event::MainEventsCleared => self.core.window.request_redraw(), // Emits a RedrawRequested event
+               Event::MainEventsCleared => self.core.window.request_redraw(), // Emits a RedrawRequested event
                 // after input events end
                 // Needed when a redraw is needed after the user resizes for example
                 Event::RedrawRequested(window_id) if window_id == self.window_id() => self.draw_frame(),
@@ -291,8 +327,8 @@ impl Drop for RtRenderer {
        // destroy_sampler(&self.logical_layer, self.sampler);
        //  self.texture.destroy(logical_layer);
         destroy_descriptor_sets(&self.logical_layer, &self.descriptor_layouts, self.descriptor_pool);
-        self.tlas.destroy(logical_layer);
-        self.blas.destroy(logical_layer);
+        self.tlas.destroy(logical_layer, &self.accel_instance);
+        self.blas.destroy(logical_layer, &self.accel_instance);
        //  self.index_buffer.destroy(logical_layer);
        //  self.vertex_buffer.destroy(logical_layer);
         self.destroy_sync_objects();

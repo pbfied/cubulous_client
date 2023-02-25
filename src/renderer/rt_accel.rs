@@ -1,4 +1,5 @@
 use std::mem;
+use ash::extensions::khr;
 use ash::extensions::khr::AccelerationStructure;
 use ash::vk;
 use ash::vk::FALSE;
@@ -125,6 +126,9 @@ impl RtAccel {
         }
         end_single_time_commands(logical_layer, command_pool, command_buffer);
 
+        index_buffer.destroy(logical_layer);
+        vertex_buffer.destroy(logical_layer);
+
         RtBlas {
             scratch_size,
             accel_buf,
@@ -138,6 +142,7 @@ impl RtAccel {
                     blas: &[&RtBlas]) -> RtTlas {
         let mut geometries: Vec<vk::AccelerationStructureGeometryKHR> = Vec::with_capacity(blas.len());
         // TODO Use a compute shader to construct BLAS instance arrays with different transforms
+        let mut blas_instance_vec: Vec<GpuBuffer> = Vec::new();
         for b in blas.iter() {
             let blas_addr_info = vk::AccelerationStructureDeviceAddressInfoKHR::default().acceleration_structure(b.acceleration_structure);
             let blas_addr = unsafe { acceleration_instance.get_acceleration_structure_device_address(&blas_addr_info) };
@@ -175,6 +180,7 @@ impl RtAccel {
                 .geometry_type(vk::GeometryTypeKHR::INSTANCES)
                 .geometry(tlas_geometry_data);
             geometries.push(tlas_geometry);
+            blas_instance_vec.push(blas_instance_buf);
         }
 
         let mut tlas_build_info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
@@ -227,6 +233,10 @@ impl RtAccel {
         }
         end_single_time_commands(logical_layer, command_pool, command_buffer);
 
+        for i in blas_instance_vec {
+            i.destroy(logical_layer);
+        }
+
         RtTlas {
             scratch_size: tlas_scratch_size,
             accel_buf: tlas_buf,
@@ -235,14 +245,15 @@ impl RtAccel {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, logical_layer: &LogicalLayer, acceleration_instance: &AccelerationStructure) {
+        unsafe { acceleration_instance.destroy_acceleration_structure(self.acceleration_structure, None) }
         self.accel_buf.destroy(logical_layer);
         self.scratch_buf.destroy(logical_layer);
     }
 }
 
 pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                                command_pool: vk::CommandPool) -> (RtTlas, RtBlas) {
+                                command_pool: vk::CommandPool) -> (AccelerationStructure, RtTlas, RtBlas) {
     // Clockwise, top to bottom, back to front
     // 0    1 - back    4   5
     // 2    3           6   7
@@ -278,5 +289,5 @@ pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLaye
                                  &vertices);
     let tlas = RtAccel::new_tlas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &[&blas]);
 
-    (tlas, blas)
+    (acceleration_instance, tlas, blas)
 }

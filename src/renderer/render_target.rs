@@ -21,8 +21,7 @@ pub struct RenderTarget {
 
 impl RenderTarget {
     pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, image_usage:
-    vk::ImageUsageFlags, color_format: vk::Format, color_space: Option<vk::ColorSpaceKHR>) ->
-                                                                                                        RenderTarget {
+    vk::ImageUsageFlags, color_format: vk::Format, color_space: Option<vk::ColorSpaceKHR>) -> RenderTarget {
         fn choose_swap_extent(window: &Window, capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
             if capabilities.current_extent.width != u32::MAX {
                 capabilities.current_extent
@@ -93,28 +92,31 @@ impl RenderTarget {
             image_count = capabilities.max_image_count
         }
 
-        let swap_create_info = vk::SwapchainCreateInfoKHR::default()
+        let mut swap_create_info = vk::SwapchainCreateInfoKHR::default()
             .min_image_count(image_count)
             .image_format(surface_format.format)
             .image_color_space(surface_format.color_space)
             .image_extent(extent)
             .image_array_layers(1) // Always 1 except for stereoscopic 3D, I.E. VR
             .surface(core.surface)
-
-            // TODO This assumes only one queue family. Consider adding support for separate queue
-            // families later on
-            .image_sharing_mode(vk::SharingMode::EXCLUSIVE)
-
-            .image_usage(image_usage) // "It is also possible that you'll
-            // render images to a separate image first to perform
-            // operations like post-processing. In that case you may use a value like
-            // VK_IMAGE_USAGE_TRANSFER_DST_BIT instead and use a memory operation to transfer the rendered
-            // image to a swap chain image."
+            .image_usage(image_usage)
             .pre_transform(capabilities.current_transform)
             .composite_alpha(vk::CompositeAlphaFlagsKHR::OPAQUE)
             .present_mode(presentation_mode)
             .clipped(true)
             .old_swapchain(vk::SwapchainKHR::null());
+
+        let family_indices;
+        if physical_layer.graphics_family_index != physical_layer.present_family_index {
+            family_indices = [physical_layer.graphics_family_index, physical_layer.present_family_index];
+            swap_create_info = swap_create_info
+                .image_sharing_mode(vk::SharingMode::CONCURRENT)
+                .queue_family_indices(&family_indices);
+        }
+        else {
+            swap_create_info = swap_create_info
+                .image_sharing_mode(vk::SharingMode::EXCLUSIVE);
+        }
 
         let swap_loader = Swapchain::new(&core.instance, &logical_layer.logical_device);
         let swap_chain: vk::SwapchainKHR;

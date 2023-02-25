@@ -34,4 +34,14 @@ impl RtCanvas {
             mem
         }
     }
+
+    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+        for (&i, (&v, &m)) in self.images.iter().zip(self.views.iter().zip(self.mem.iter())) {
+            unsafe {
+                logical_layer.logical_device.destroy_image_view(v, None);
+                logical_layer.logical_device.destroy_image(i, None);
+                logical_layer.logical_device.free_memory(m, None);
+            }
+        }
+    }
 }
