@@ -1,7 +1,10 @@
+use ash::extensions::khr::AccelerationStructure;
 use ash::vk;
+use ash::vk::AccelerationStructureKHR;
 use crate::renderer::logical_layer::LogicalLayer;
 use crate::renderer::rt_accel::RtTlas;
 use crate::renderer::rt_canvas::RtCanvas;
+use crate::renderer::rt_ubo::{RtUniformBuffer, RtUniformBufferObject};
 
 pub fn create_per_frame_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
     let binding_arr = [
@@ -9,6 +12,16 @@ pub fn create_per_frame_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
             .binding(0)
             .descriptor_count(1)
             .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(1)
+            .descriptor_count(1)
+            .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+            .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR),
+        vk::DescriptorSetLayoutBinding::default()
+            .binding(2)
+            .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+            .descriptor_count(1)
             .stage_flags(vk::ShaderStageFlags::RAYGEN_KHR)
     ];
 
@@ -39,8 +52,8 @@ pub fn create_singleton_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
     }
 }
 
-pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, tlas: &RtTlas, per_frame:
-                              vk::DescriptorSetLayout, singleton: vk::DescriptorSetLayout,
+pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, tlas: &Vec<RtTlas>,
+                              per_frame_data: &RtUniformBuffer, per_frame_layout: vk::DescriptorSetLayout,//  singleton: vk::DescriptorSetLayout,
                               max_frames: usize) -> (Vec<vk::DescriptorSet>, vk::DescriptorPool) {
     let pool_sizes = [
         vk::DescriptorPoolSize::default()
@@ -48,6 +61,9 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
             .descriptor_count(max_frames as u32),
         vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+            .descriptor_count(1),
+        vk::DescriptorPoolSize::default()
+            .ty(vk::DescriptorType::UNIFORM_BUFFER)
             .descriptor_count(1)
     ];
 
@@ -61,9 +77,9 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
 
     let mut layout_vec: Vec<vk::DescriptorSetLayout> = Vec::new();
     for _ in 0..max_frames {
-        layout_vec.push(per_frame);
+        layout_vec.push(per_frame_layout);
     }
-    layout_vec.push(singleton);
+   // layout_vec.push(singleton);
 
     let allocate_info = vk::DescriptorSetAllocateInfo::default()
         .descriptor_pool(descriptor_pool)
@@ -74,7 +90,7 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
 
     // Update the per frame descriptors
     let mut image_infos: Vec<[vk::DescriptorImageInfo; 1]> = Vec::new();
-    let mut write_descriptor_vec: Vec<vk::WriteDescriptorSet> = Vec::new();
+    // let mut write_descriptor_vec: Vec<vk::WriteDescriptorSet> = Vec::new();
     for f in 0..max_frames {
         image_infos.push([vk::DescriptorImageInfo::default()
             .image_layout(vk::ImageLayout::GENERAL)
@@ -82,30 +98,57 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
     }
 
     for f in 0..max_frames {
-        let write_descriptor_set = vk::WriteDescriptorSet::default()
-            .dst_set(descriptor_sets[f])
-            .dst_array_element(0)
-            .dst_binding(0)
-            .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
-            .image_info(&image_infos[f]);
+        let structure_slice = [tlas[f].acceleration_structure];
+        let mut accel_write_set = vk::WriteDescriptorSetAccelerationStructureKHR::default()
+            .acceleration_structures(&structure_slice);
 
-        write_descriptor_vec.push(write_descriptor_set);
+        let transform_buffer_info = vk::DescriptorBufferInfo::default()
+            .offset(0) // The Src buffer index to update from
+            .buffer(per_frame_data.data[f]) // The Src buffer to update the descriptor set from
+            .range(std::mem::size_of::<RtUniformBufferObject>() as vk::DeviceSize);
+        let buffer_info = [transform_buffer_info]; // Can also use VK_WHOLE_SIZE if updating the entire range
+
+        let mut write_descriptor_set = [
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor_sets[f])
+                .dst_array_element(0)
+                .dst_binding(0)
+                .descriptor_type(vk::DescriptorType::STORAGE_IMAGE)
+                .image_info(&image_infos[f]),
+            vk::WriteDescriptorSet::default()
+                .dst_set(descriptor_sets[f])
+                .dst_binding(1)
+                .dst_array_element(0)
+                .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+                .push_next(&mut accel_write_set),
+            vk::WriteDescriptorSet::default() // The target descriptor set to update
+                .dst_set(descriptor_sets[f])
+                .dst_binding(2) // The location in the target buffer to update
+                .buffer_info(&buffer_info)
+                .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
+                .dst_array_element(0) // The descriptor set can describe an array of elements
+        ];
+        write_descriptor_set[1].descriptor_count = 1; // Not set by push_next;
+        unsafe {
+            logical_layer.logical_device.update_descriptor_sets(&write_descriptor_set, &[]);
+        }
     }
 
-    let structure_slice = [tlas.acceleration_structure];
-    let mut accel_write_set = vk::WriteDescriptorSetAccelerationStructureKHR::default()
-        .acceleration_structures(&structure_slice);
-    let mut accel_write_descriptor_set = vk::WriteDescriptorSet::default()
-        .dst_set(descriptor_sets[max_frames])
-        .dst_binding(0)
-        .dst_array_element(0)
-        .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
-        .push_next(&mut accel_write_set);
-    accel_write_descriptor_set.descriptor_count = 1; // Not set by push_next;
-    write_descriptor_vec.push(accel_write_descriptor_set);
-    unsafe {
-        logical_layer.logical_device.update_descriptor_sets(write_descriptor_vec.as_slice(), &[]);
-    }
+    // Singleton setup
+    // let structure_slice = [tlas.acceleration_structure];
+    // let mut accel_write_set = vk::WriteDescriptorSetAccelerationStructureKHR::default()
+    //     .acceleration_structures(&structure_slice);
+    // let mut accel_write_descriptor_set = vk::WriteDescriptorSet::default()
+    //     .dst_set(descriptor_sets[max_frames])
+    //     .dst_binding(0)
+    //     .dst_array_element(0)
+    //     .descriptor_type(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
+    //     .push_next(&mut accel_write_set);
+    // accel_write_descriptor_set.descriptor_count = 1; // Not set by push_next;
+    // write_descriptor_vec.push(accel_write_descriptor_set);
+    // unsafe {
+    //     logical_layer.logical_device.update_descriptor_sets(write_descriptor_vec.as_slice(), &[]);
+    // }
 
     (descriptor_sets, descriptor_pool)
 }

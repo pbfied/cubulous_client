@@ -253,7 +253,8 @@ impl RtAccel {
 }
 
 pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                                command_pool: vk::CommandPool) -> (AccelerationStructure, RtTlas, RtBlas) {
+                                command_pool: vk::CommandPool, max_frames: usize)
+    -> (AccelerationStructure, Vec<RtTlas>, RtBlas) {
     // Clockwise, top to bottom, back to front
     // 0    1 - back    4   5
     // 2    3           6   7
@@ -287,7 +288,11 @@ pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLaye
 
     let blas = RtAccel::new_blas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &indices,
                                  &vertices);
-    let tlas = RtAccel::new_tlas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &[&blas]);
+    let tlas: Vec<RtTlas> = Vec::from(
+        [
+            RtAccel::new_tlas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &[&blas]),
+            RtAccel::new_tlas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &[&blas])
+        ]);
 
     (acceleration_instance, tlas, blas)
 }

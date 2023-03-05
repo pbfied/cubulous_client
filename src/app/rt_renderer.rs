@@ -13,6 +13,7 @@ use cubulous_client::renderer::rt_accel::{create_acceleration_structures, RtBlas
 use cubulous_client::renderer::rt_canvas::RtCanvas;
 use cubulous_client::renderer::rt_descriptor::{create_descriptor_sets, create_per_frame_descriptor_set_layout, create_singleton_descriptor_set_layout, destroy_descriptor_sets};
 use cubulous_client::renderer::rt_pipeline::RtPipeline;
+use cubulous_client::renderer::rt_ubo::RtUniformBuffer;
 
 const MAX_FRAMES_IN_FLIGHT: usize = 2;
 
@@ -33,8 +34,9 @@ pub struct RtRenderer {
     descriptor_pool: vk::DescriptorPool,
     canvas: RtCanvas,
     accel_instance: khr::AccelerationStructure,
-    tlas: RtTlas,
-    blas: RtBlas
+    tlas: Vec<RtTlas>,
+    blas: RtBlas,
+    per_frame_data: RtUniformBuffer
 }
 
 impl RtRenderer {
@@ -66,15 +68,16 @@ impl RtRenderer {
             .command_buffer_count(MAX_FRAMES_IN_FLIGHT as u32);
         let command_buffers = unsafe { logical_layer.logical_device.allocate_command_buffers(&buf_create_info).unwrap() };
         let current_frame: usize = 0;
-        let descriptor_layouts = Vec::from([create_per_frame_descriptor_set_layout(&logical_layer),
-            create_singleton_descriptor_set_layout(&logical_layer)]);
+        let descriptor_layouts = Vec::from([create_per_frame_descriptor_set_layout(&logical_layer)]);
+            //create_singleton_descriptor_set_layout(&logical_layer)]);
         let rt_pipeline = RtPipeline::new(&core, &physical_layer, &logical_layer, command_pool, &descriptor_layouts);
         let canvas = RtCanvas::new(&core, &physical_layer, &logical_layer, &render_target, MAX_FRAMES_IN_FLIGHT);
         let (accel_instance, tlas, blas) = create_acceleration_structures(&core, &physical_layer, &logical_layer,
-                                                                         command_pool);
+                                                                         command_pool, MAX_FRAMES_IN_FLIGHT);
+        let per_frame_data = RtUniformBuffer::new(&core, &physical_layer, &logical_layer, MAX_FRAMES_IN_FLIGHT);
         let (descriptor_sets, descriptor_pool) = create_descriptor_sets(&logical_layer, &canvas, &tlas,
-                                                                   descriptor_layouts[0],
-                                                     descriptor_layouts[1], MAX_FRAMES_IN_FLIGHT);
+                                                                   //descriptor_layouts[0],
+                                                     &per_frame_data, descriptor_layouts[0], MAX_FRAMES_IN_FLIGHT);
 
         RtRenderer {
             core,
@@ -95,6 +98,7 @@ impl RtRenderer {
             accel_instance,
             tlas,
             blas,
+            per_frame_data
         }
     }
 
@@ -170,9 +174,6 @@ impl RtRenderer {
                 .pipelines[0]);
             logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
                 .rt_pipeline.pipeline_layout, 0, &[*self.descriptor_sets.get(self.current_frame).unwrap()], &[]);
-            // TODO Should probably not bind the same acceleration structure every frame
-            logical_device.cmd_bind_descriptor_sets(command_buffer, vk::PipelineBindPoint::RAY_TRACING_KHR, self
-                .rt_pipeline.pipeline_layout, 1, &[*self.descriptor_sets.get(MAX_FRAMES_IN_FLIGHT).unwrap()], &[]);
             logical_device.cmd_pipeline_barrier(command_buffer, vk::PipelineStageFlags::ALL_COMMANDS,
                                                 vk::PipelineStageFlags::ALL_COMMANDS, vk::DependencyFlags::empty(),
                                                 &[], &[], &[canvas_image_to_dst_barrier]);
@@ -232,7 +233,7 @@ impl RtRenderer {
         let submit_array = [submit_info];
         let swap_chains = [self.render_target.swap_chain];
 
-        // self.uniform_buffer.build_transforms(render_target, current_frame);
+        self.per_frame_data.build_transforms(&self.render_target, current_frame);
 
         unsafe {
             logical_device.wait_for_fences(&fences, true, u64::MAX).unwrap();
@@ -327,14 +328,16 @@ impl Drop for RtRenderer {
        // destroy_sampler(&self.logical_layer, self.sampler);
        //  self.texture.destroy(logical_layer);
         destroy_descriptor_sets(&self.logical_layer, &self.descriptor_layouts, self.descriptor_pool);
-        self.tlas.destroy(logical_layer, &self.accel_instance);
+        for t in &self.tlas {
+            t.destroy(logical_layer, &self.accel_instance);
+        };
         self.blas.destroy(logical_layer, &self.accel_instance);
        //  self.index_buffer.destroy(logical_layer);
        //  self.vertex_buffer.destroy(logical_layer);
         self.destroy_sync_objects();
         self.destroy_command_pool();
         self.rt_pipeline.destroy(logical_layer);
-        // self.uniform_buffer.destroy(logical_layer);
+        self.per_frame_data.destroy(logical_layer);
         // destroy_render_pass(logical_layer, self.render_pass);
         self.logical_layer.destroy();
         self.core.destroy();

@@ -22,3 +22,4 @@ pub mod rt_canvas;
 pub mod rt_accel;
 pub mod gpu_buffer;
 pub mod single_time;
+pub mod rt_ubo;
