@@ -1,0 +1,40 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+#include "raycommon.glsl"
+
+layout(binding = 2, set = 0) uniform UniformBufferObject {
+    mat4 viewInverse;
+    mat4 projInverse;
+} ubo;
+layout(binding = 1, set = 0) uniform accelerationStructureEXT topLevelAS;
+layout(binding = 0, set = 0, rgba32f) uniform image2D image;
+
+layout(location = 0) rayPayloadEXT hitPayload prd;
+
+void main() 
+{
+    // Map each launch ID to the corresponding point in normalized device coordinates (-1, 1)
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
+    vec2 d = inUV * 2.0 - 1.0;
+
+    // View inverse is the transform of the camera, so this extracts the translation component of the camera
+    vec4 origin    = ubo.viewInverse * vec4(0, 0, 0, 1);
+    // Assuming that the camera is located at (0, 0, 0), generate a ray going straight out from the screen.
+    // pivot the ray around the near clipping plane to start at the origin (0, 0, 0) and point outward through the
+    // assigned screen point.
+    vec4 target    = ubo.projInverse * vec4(d.x, d.y, 1, 1);
+    // Transform the ray to adjust for nonzero camera position and rotation
+    vec4 direction = ubo.viewInverse * vec4(normalize(target.xyz), 0);
+
+    // Shouldn't be needed since opaque flags on accel structure are set, but probably safest to force since any hit
+    // shader isn't implemented yet.
+    uint rayflags = gl_RayFlagsOpaqueEXT;
+    uint cullmask = 0xFF;
+    float tMin = 0.001;
+    float tMax = 10000.0;
+    // The three 0s are sbt offset, sbt stride and missIndex. I'd love to know why these values are needed in addition
+    // to the pipeline definitions.
+    traceRayEXT(topLevelAS, rayflags, cullmask, 0, 0, 0, origin.xyz, tMin, direction.xyz, tMax, 0);
+    imageStore(image, ivec2(gl_LaunchIDEXT.xy), vec4(prd.hitValue, 1.0));
+}

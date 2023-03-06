@@ -16,4 +16,4 @@ Cargo.lock
 .idea
 
 # Third party assets
-textures/texture.jpg
+graphics/textures/texture.jpg

@@ -5,25 +5,23 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[workspace]
+members = [
+    "graphics/renderlib",
+]
+
 [dependencies]
-num = "0.4.0"
-raw-window-handle = "0.5"
-winit = "0.27.1"
-# The examples require the validation layers, which means the SDK or
-# equivalent development packages should be present, so we can link
-# directly and benefit from the infallible `Entry` constructor.
+renderlib = { path = "graphics/renderlib" }
 ash = { path = "../ash/ash", default-features = false, features = ["loaded", "debug"] }
 ash-window = { path = "../ash/ash-window" }
-png = "0.17.6"
-memoffset = "0.7.1"
 cgmath = "0.18.0"
-image = "0.24.5"
-tobj = "3.2.3"
+winit = "0.28.2"
 
-[[bin]]
+[[example]]
 name = "raster_tutorial"
-path = "src/app/raster_renderer.rs"
+path = "examples/raster_renderer.rs"
 
-[[bin]]
+[[example]]
 name = "rt_tutorial"
-path = "src/app/rt_renderer.rs"
+path = "examples/rt_renderer.rs"
+
