@@ -6,22 +6,20 @@ use ash::vk::ImageView;
 
 use winit::window::Window;
 
-use crate::core::Core;
 use crate::image::create_image_view;
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
+use crate::vkcore::VkCore;
 
 pub struct RenderTarget {
     pub swap_loader: Swapchain,
     pub swap_chain: vk::SwapchainKHR,
-    pub(crate) surface_format: vk::Format,
+    pub surface_format: vk::Format,
     pub extent: vk::Extent2D,
     pub(crate) image_views: Vec<vk::ImageView>,
 }
 
 impl RenderTarget {
-    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, image_usage:
-    vk::ImageUsageFlags, color_format: vk::Format, color_space: Option<vk::ColorSpaceKHR>) -> RenderTarget {
+    pub fn new(core: &VkCore, image_usage: vk::ImageUsageFlags, color_format: vk::Format,
+               color_space: Option<vk::ColorSpaceKHR>) -> RenderTarget {
         fn choose_swap_extent(window: &Window, capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
             if capabilities.current_extent.width != u32::MAX {
                 capabilities.current_extent
@@ -38,7 +36,8 @@ impl RenderTarget {
             }
         }
 
-        fn setup_image_views(logical_layer: &LogicalLayer, swap_loader: &Swapchain, swap_chain: vk::SwapchainKHR, surface_format: vk::Format) -> Vec<vk::ImageView> {
+        fn setup_image_views(core: &VkCore, swap_loader: &Swapchain, swap_chain: vk::SwapchainKHR, surface_format:
+        vk::Format) -> Vec<vk::ImageView> {
             let swap_chain_images: Vec<vk::Image>;
             unsafe {
                 swap_chain_images = swap_loader
@@ -47,7 +46,7 @@ impl RenderTarget {
 
             let mut image_views: Vec<vk::ImageView> = Vec::new();
             for i in swap_chain_images {
-                image_views.push(create_image_view(logical_layer, i, surface_format,
+                image_views.push(create_image_view(core, i, surface_format,
                                                        vk::ImageAspectFlags::COLOR,
                                                    1));
             }
@@ -58,26 +57,24 @@ impl RenderTarget {
         let capabilities: vk::SurfaceCapabilitiesKHR;
         unsafe {
             capabilities = core.surface_loader
-                .get_physical_device_surface_capabilities(physical_layer.physical_device,
+                .get_physical_device_surface_capabilities(core.physical_device,
                                                           core.surface).unwrap();
         }
 
         // Choose the first surface format with the specified conditions or choose the first option
         // otherwise
         let surface_format =
-            match physical_layer
-                .supported_surface_formats
+            match core.supported_surface_formats
                 .iter()
                 .find(|f|f.format == color_format &&
                     (if color_space.is_some() { f.color_space == color_space.unwrap() } else { true }) )
             {
                 Some(x) => x,
-                None => &physical_layer.supported_surface_formats[0]
+                None => &core.supported_surface_formats[0]
             };
 
         let presentation_mode =
-            match physical_layer
-                .present_modes
+            match core.present_modes
                 .iter()
                 .find(|p|**p == vk::PresentModeKHR::MAILBOX)
             {
@@ -107,8 +104,8 @@ impl RenderTarget {
             .old_swapchain(vk::SwapchainKHR::null());
 
         let family_indices;
-        if physical_layer.graphics_family_index != physical_layer.present_family_index {
-            family_indices = [physical_layer.graphics_family_index, physical_layer.present_family_index];
+        if core.graphics_family_index != core.present_family_index {
+            family_indices = [core.graphics_family_index, core.present_family_index];
             swap_create_info = swap_create_info
                 .image_sharing_mode(vk::SharingMode::CONCURRENT)
                 .queue_family_indices(&family_indices);
@@ -118,7 +115,7 @@ impl RenderTarget {
                 .image_sharing_mode(vk::SharingMode::EXCLUSIVE);
         }
 
-        let swap_loader = Swapchain::new(&core.instance, &logical_layer.logical_device);
+        let swap_loader = Swapchain::new(&core.instance, &core.logical_device);
         let swap_chain: vk::SwapchainKHR;
         unsafe {
             swap_chain = swap_loader
@@ -126,7 +123,7 @@ impl RenderTarget {
         }
         // Image views are only needed by the raster renderer
         let image_views = match image_usage & vk::ImageUsageFlags::COLOR_ATTACHMENT {
-            vk::ImageUsageFlags::COLOR_ATTACHMENT => setup_image_views(&logical_layer,
+            vk::ImageUsageFlags::COLOR_ATTACHMENT => setup_image_views(core,
                                                                        &swap_loader,
                                                                        swap_chain,
                                                                        surface_format.format),
@@ -142,10 +139,10 @@ impl RenderTarget {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, core: &VkCore) {
         unsafe {
             for &v in self.image_views.iter() {
-                logical_layer.logical_device.destroy_image_view(v, None);
+                core.logical_device.destroy_image_view(v, None);
             }
 
             self.swap_loader.destroy_swapchain(self.swap_chain, None);

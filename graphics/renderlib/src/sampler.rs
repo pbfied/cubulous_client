@@ -1,10 +1,8 @@
 use ash::vk;
-use crate::core::Core;
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
+use crate::vkcore::VkCore;
 
-pub fn create_sampler(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, mip_levels: u32) -> vk::Sampler {
-    let properties = unsafe { core.instance.get_physical_device_properties(physical_layer.physical_device) };
+pub fn create_sampler(core: &VkCore, mip_levels: u32) -> vk::Sampler {
+    let properties = unsafe { core.instance.get_physical_device_properties(core.physical_device) };
 
     let sampler_create_info = vk::SamplerCreateInfo::default()
         .mag_filter(vk::Filter::LINEAR) // How to interpolate magnified or minified texels
@@ -23,11 +21,11 @@ pub fn create_sampler(core: &Core, physical_layer: &PhysicalLayer, logical_layer
         .min_lod(0.0)
         .max_lod(mip_levels as f32);
 
-    unsafe { logical_layer.logical_device.create_sampler(&sampler_create_info, None)
+    unsafe { core.logical_device.create_sampler(&sampler_create_info, None)
         .unwrap() }
 }
 
-pub fn destroy_sampler(logical_layer: &LogicalLayer, sampler: vk::Sampler) {
-    unsafe { logical_layer.logical_device.destroy_sampler(sampler, None); }
+pub fn destroy_sampler(core: &VkCore, sampler: vk::Sampler) {
+    unsafe { core.logical_device.destroy_sampler(sampler, None); }
 }
 

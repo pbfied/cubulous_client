@@ -8,12 +8,14 @@ edition = "2021"
 [workspace]
 members = [
     "graphics/renderlib",
+    "graphics/rt_renderer"
 ]
 
 [dependencies]
-renderlib = { path = "graphics/renderlib" }
 ash = { path = "../ash/ash", default-features = false, features = ["loaded", "debug"] }
 ash-window = { path = "../ash/ash-window" }
+renderlib = { path = "graphics/renderlib" }
+rt_renderer = { path= "graphics/rt_renderer" }
 cgmath = "0.18.0"
 winit = "0.28.2"
 

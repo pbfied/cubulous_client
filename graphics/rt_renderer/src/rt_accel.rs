@@ -2,13 +2,9 @@ use std::mem;
 use ash::extensions::khr;
 use ash::extensions::khr::AccelerationStructure;
 use ash::vk;
-use ash::vk::FALSE;
-use image::imageops::unsharpen;
-use crate::core::Core;
-use crate::gpu_buffer::GpuBuffer;
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
-use crate::single_time::{begin_single_time_commands, end_single_time_commands};
+use renderlib::gpu_buffer::GpuBuffer;
+use renderlib::single_time::{begin_single_time_commands, end_single_time_commands};
+use renderlib::vkcore::VkCore;
 
 // pub const TRIANGLE_FACING_CULL_DISABLE: Self = Self(0b1);
 // pub const TRIANGLE_FLIP_FACING: Self = Self(0b10);
@@ -30,23 +26,22 @@ pub type RtBlas = RtAccel;
 pub type RtTlas = RtAccel;
 
 impl RtAccel {
-    pub fn new_blas<T>(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                       acceleration_instance: &AccelerationStructure, command_pool: vk::CommandPool,
+    pub fn new_blas<T>(core: &VkCore, acceleration_instance: &AccelerationStructure, command_pool: vk::CommandPool,
                        indices: &[T], vertices: &[f32]) -> RtBlas {
-        let index_buffer = GpuBuffer::new_initialized(core, physical_layer, logical_layer, command_pool,
+        let index_buffer = GpuBuffer::new_initialized(core, command_pool,
                                                       vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR |
                                                           vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                                                       vk::BufferUsageFlags::empty(), &indices);
         let index_dev_addr = vk::DeviceOrHostAddressConstKHR {
-            device_address: index_buffer.get_device_address(logical_layer)
+            device_address: index_buffer.get_device_address(core)
         };
-        let vertex_buffer = GpuBuffer::new_initialized(core, physical_layer, logical_layer, command_pool,
+        let vertex_buffer = GpuBuffer::new_initialized(core, command_pool,
                                                        vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                                                            | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                                                        vk::BufferUsageFlags::empty(),
                                                        &vertices);
         let vertex_dev_addr = vk::DeviceOrHostAddressConstKHR {
-            device_address: vertex_buffer.get_device_address(logical_layer)
+            device_address: vertex_buffer.get_device_address(core)
         };
 
         assert_eq!(vertices.len() % 3, 0);
@@ -84,7 +79,7 @@ impl RtAccel {
             acceleration_instance.get_acceleration_structure_build_sizes(vk::AccelerationStructureBuildTypeKHR::DEVICE,
                                                                          &blas_build_info,&[(indices.len() / 3) as u32]) };
         let scratch_size = build_size.build_scratch_size;
-        let scratch_buf = GpuBuffer::new(core, physical_layer, logical_layer, scratch_size,
+        let scratch_buf = GpuBuffer::new(core, scratch_size,
                                                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS |
                                                            vk::BufferUsageFlags::STORAGE_BUFFER); // Not sure why
                                                        // STORAGE_BUFFER property is here, but the Nvidia tutorial
@@ -92,11 +87,11 @@ impl RtAccel {
 
         let addr_info = vk::BufferDeviceAddressInfo::default()
             .buffer(scratch_buf.buf);
-        let scratch_ptr = unsafe { logical_layer.logical_device.get_buffer_device_address(&addr_info) };
+        let scratch_ptr = unsafe { core.logical_device.get_buffer_device_address(&addr_info) };
 
         blas_build_info = blas_build_info.scratch_data(vk::DeviceOrHostAddressKHR { device_address: scratch_ptr });
 
-        let accel_buf = GpuBuffer::new(core, physical_layer, logical_layer, build_size.acceleration_structure_size,
+        let accel_buf = GpuBuffer::new(core, build_size.acceleration_structure_size,
                                                  vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR |
                                                      vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS); // Local to GPU
 
@@ -119,15 +114,15 @@ impl RtAccel {
             build_range_info_l1.as_slice()
         ];
 
-        let command_buffer = begin_single_time_commands(logical_layer, command_pool);
+        let command_buffer = begin_single_time_commands(core, command_pool);
         unsafe {
             acceleration_instance.cmd_build_acceleration_structures(command_buffer, &[blas_build_info],
                                                                     build_range_info.as_slice())
         }
-        end_single_time_commands(logical_layer, command_pool, command_buffer);
+        end_single_time_commands(core, command_pool, command_buffer);
 
-        index_buffer.destroy(logical_layer);
-        vertex_buffer.destroy(logical_layer);
+        index_buffer.destroy(core);
+        vertex_buffer.destroy(core);
 
         RtBlas {
             scratch_size,
@@ -137,8 +132,7 @@ impl RtAccel {
         }
     }
 
-    pub fn new_tlas(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                    acceleration_instance: &AccelerationStructure, command_pool: vk::CommandPool,
+    pub fn new_tlas(core: &VkCore, acceleration_instance: &AccelerationStructure, command_pool: vk::CommandPool,
                     blas: &[&RtBlas]) -> RtTlas {
         let mut geometries: Vec<vk::AccelerationStructureGeometryKHR> = Vec::with_capacity(blas.len());
         // TODO Use a compute shader to construct BLAS instance arrays with different transforms
@@ -163,12 +157,12 @@ impl RtAccel {
                 }
             ];
 
-            let blas_instance_buf = GpuBuffer::new_initialized(core, physical_layer, logical_layer, command_pool,
+            let blas_instance_buf = GpuBuffer::new_initialized(core, command_pool,
                                                                vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
                                                                    | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS,
                                                                vk::BufferUsageFlags::empty(), &blas_instances);
             let blas_instance_addr = vk::DeviceOrHostAddressConstKHR {
-                device_address: blas_instance_buf.get_device_address(logical_layer)
+                device_address: blas_instance_buf.get_device_address(core)
             };
             let tlas_geometry_instances = vk::AccelerationStructureGeometryInstancesDataKHR::default()
                 .data(blas_instance_addr)
@@ -193,17 +187,17 @@ impl RtAccel {
                                                                          &tlas_build_info, &[geometries.len() as u32])
         };
         let tlas_scratch_size = tlas_build_size.build_scratch_size;
-        let scratch_buf = GpuBuffer::new(core, physical_layer, logical_layer, tlas_scratch_size,
+        let scratch_buf = GpuBuffer::new(core, tlas_scratch_size,
                                                        vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS |
                                                            vk::BufferUsageFlags::STORAGE_BUFFER); // Not sure why
                                                        // STORAGE_BUFFER property is here, but the Nvidia tutorial
                                                        // uses it
         let addr_info = vk::BufferDeviceAddressInfo::default()
             .buffer(scratch_buf.buf);
-        let scratch_ptr = unsafe { logical_layer.logical_device.get_buffer_device_address(&addr_info) };
+        let scratch_ptr = unsafe { core.logical_device.get_buffer_device_address(&addr_info) };
         tlas_build_info = tlas_build_info.scratch_data(vk::DeviceOrHostAddressKHR { device_address: scratch_ptr });
 
-        let tlas_buf = GpuBuffer::new(core, physical_layer,logical_layer,tlas_build_size.acceleration_structure_size,
+        let tlas_buf = GpuBuffer::new(core, tlas_build_size.acceleration_structure_size,
                                                  vk::BufferUsageFlags::ACCELERATION_STRUCTURE_STORAGE_KHR | // Obviously needed
                                                      // to be an AS storage location
                                                      vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS);
@@ -226,15 +220,15 @@ impl RtAccel {
         let build_range_info = [
             build_range_info_l1.as_slice()
         ];
-        let command_buffer = begin_single_time_commands(logical_layer, command_pool);
+        let command_buffer = begin_single_time_commands(core, command_pool);
         unsafe {
             acceleration_instance.cmd_build_acceleration_structures(command_buffer, &[tlas_build_info],
                                                                     build_range_info.as_slice());
         }
-        end_single_time_commands(logical_layer, command_pool, command_buffer);
+        end_single_time_commands(core, command_pool, command_buffer);
 
         for i in blas_instance_vec {
-            i.destroy(logical_layer);
+            i.destroy(core);
         }
 
         RtTlas {
@@ -245,21 +239,19 @@ impl RtAccel {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer, acceleration_instance: &AccelerationStructure) {
+    pub fn destroy(&self, core: &VkCore, acceleration_instance: &AccelerationStructure) {
         unsafe { acceleration_instance.destroy_acceleration_structure(self.acceleration_structure, None) }
-        self.accel_buf.destroy(logical_layer);
-        self.scratch_buf.destroy(logical_layer);
+        self.accel_buf.destroy(core);
+        self.scratch_buf.destroy(core);
     }
 }
 
-pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-                                command_pool: vk::CommandPool, max_frames: usize)
+pub fn create_acceleration_structures(core: &VkCore, command_pool: vk::CommandPool, max_frames: usize)
     -> (AccelerationStructure, Vec<RtTlas>, RtBlas) {
     // Clockwise, top to bottom, back to front
     // 0    1 - back    4   5
     // 2    3           6   7
-    let acceleration_instance = AccelerationStructure::new(&core.instance, &logical_layer
-        .logical_device);
+    let acceleration_instance = AccelerationStructure::new(&core.instance, &core.logical_device);
 
     let indices: [u16; 36] = [
         0, 1, 2, // back
@@ -286,12 +278,12 @@ pub fn create_acceleration_structures(core: &Core, physical_layer: &PhysicalLaye
         0.5, -0.5, 0.5,
     ];
 
-    let blas = RtAccel::new_blas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &indices,
+    let blas = RtAccel::new_blas(core, &acceleration_instance, command_pool, &indices,
                                  &vertices);
     let tlas: Vec<RtTlas> = Vec::from(
         [
-            RtAccel::new_tlas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &[&blas]),
-            RtAccel::new_tlas(core, physical_layer, logical_layer, &acceleration_instance, command_pool, &[&blas])
+            RtAccel::new_tlas(core, &acceleration_instance, command_pool, &[&blas]),
+            RtAccel::new_tlas(core, &acceleration_instance, command_pool, &[&blas])
         ]);
 
     (acceleration_instance, tlas, blas)

@@ -3,30 +3,27 @@ use ash::vk;
 use ash::vk::Offset3D;
 use image::EncodableLayout;
 use image::io::Reader;
-use crate::core::Core;
-use crate::gpu_buffer::{create_buffer, GpuBuffer};
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
+use crate::gpu_buffer::{create_buffer};
 use crate::image::{create_image_view, create_image, copy_buffer_to_image, transition_image_layout};
 use crate::single_time::{begin_single_time_commands, end_single_time_commands};
+use crate::vkcore::VkCore;
 
-fn create_texture_image_view(logical_layer: &LogicalLayer, image: vk::Image, mip_levels: u32) -> vk::ImageView {
-    create_image_view(logical_layer, image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR, mip_levels)
+fn create_texture_image_view(core: &VkCore, image: vk::Image, mip_levels: u32) -> vk::ImageView {
+    create_image_view(core, image, vk::Format::R8G8B8A8_SRGB, vk::ImageAspectFlags::COLOR, mip_levels)
 }
 
-fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: &PhysicalLayer,
-                     command_pool: vk::CommandPool, image: vk::Image, image_format: vk::Format,
+fn generate_mip_maps(core: &VkCore, command_pool: vk::CommandPool, image: vk::Image, image_format: vk::Format,
                      tex_width: u32, tex_height: u32, mip_levels: u32) {
     let format_properties = unsafe {
         core.instance
-            .get_physical_device_format_properties(physical_layer.physical_device, image_format)
+            .get_physical_device_format_properties(core.physical_device, image_format)
     };
 
     assert_ne!(format_properties.optimal_tiling_features &
                    vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR,
                vk::FormatFeatureFlags::empty());
 
-    let cmd_buffer = begin_single_time_commands(logical_layer, command_pool);
+    let cmd_buffer = begin_single_time_commands(core, command_pool);
 
     let mut sub_resource_range = vk::ImageSubresourceRange::default()
         .aspect_mask(vk::ImageAspectFlags::COLOR)
@@ -51,7 +48,7 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
             .dst_access_mask(vk::AccessFlags::TRANSFER_READ);
 
         unsafe {
-            logical_layer.logical_device
+            core.logical_device
                 .cmd_pipeline_barrier(cmd_buffer,
                                       vk::PipelineStageFlags::TRANSFER,
                                       vk::PipelineStageFlags::TRANSFER,
@@ -91,7 +88,7 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
             }])
             .dst_subresource(dest_sub_resource);
 
-        unsafe { logical_layer.logical_device.cmd_blit_image(cmd_buffer, image,
+        unsafe { core.logical_device.cmd_blit_image(cmd_buffer, image,
                                                              vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
                                                              image,
                                                              vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -103,7 +100,7 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
             .dst_access_mask(vk::AccessFlags::SHADER_READ);
 
         unsafe {
-            logical_layer.logical_device.cmd_pipeline_barrier(cmd_buffer,
+            core.logical_device.cmd_pipeline_barrier(cmd_buffer,
                                                               vk::PipelineStageFlags::TRANSFER,
                                                               vk::PipelineStageFlags::FRAGMENT_SHADER,
                                                               vk::DependencyFlags::empty(),
@@ -124,7 +121,7 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
         .subresource_range(sub_resource_range);
 
     unsafe {
-        logical_layer.logical_device.cmd_pipeline_barrier(cmd_buffer,
+        core.logical_device.cmd_pipeline_barrier(cmd_buffer,
                                                           vk::PipelineStageFlags::TRANSFER,
                                                           vk::PipelineStageFlags::FRAGMENT_SHADER,
                                                           vk::DependencyFlags::empty(),
@@ -132,7 +129,7 @@ fn generate_mip_maps(core: &Core, logical_layer: &LogicalLayer, physical_layer: 
                                                           &[barrier.clone()]);
     }
 
-    end_single_time_commands(logical_layer, command_pool, cmd_buffer);
+    end_single_time_commands(core, command_pool, cmd_buffer);
 }
 
 pub struct Texture {
@@ -143,30 +140,26 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer,
-               command_pool: vk::CommandPool, path: &str) -> Texture {
+    pub fn new(core: &VkCore, command_pool: vk::CommandPool, path: &str) -> Texture {
         let img = Reader::open(path).unwrap().decode().unwrap().to_rgba8();
         let img_bytes = img.as_bytes();
         let img_size = img.len();
         assert_eq!(img.len(), (img.width() * img.height() * 4) as usize);
 
-        let (img_mem, img_buf) = create_buffer(core, physical_layer, logical_layer, img_size as vk::DeviceSize,
+        let (img_mem, img_buf) = create_buffer(core, img_size as vk::DeviceSize,
                                                vk::BufferUsageFlags::TRANSFER_SRC,
                                                vk::MemoryPropertyFlags::HOST_VISIBLE |
                                                    vk::MemoryPropertyFlags::HOST_COHERENT);
         unsafe {
-            let mapped = logical_layer
-                .logical_device
-                .map_memory(img_mem, 0, img_size as vk::DeviceSize, vk::MemoryMapFlags::empty())
-                .unwrap() as *mut u8;
+            let mapped = core.logical_device.map_memory(img_mem, 0, img_size as vk::DeviceSize,
+                                                        vk::MemoryMapFlags::empty()).unwrap() as *mut u8;
             mapped.copy_from_nonoverlapping(img_bytes.as_ptr(), img_size);
-            logical_layer.logical_device.unmap_memory(img_mem);
+            core.logical_device.unmap_memory(img_mem);
         };
 
         let mip_levels = ((img.height().max(img.width()) as f64).log(2.0).floor() as u32) + 1;
 
-        let (texture_image, texture_mem) = create_image(core, physical_layer,
-                                                        logical_layer, img.width(),
+        let (texture_image, texture_mem) = create_image(core, img.width(),
                                                         img.height(),
                                                         mip_levels,
                                                         vk::Format::R8G8B8A8_SRGB,
@@ -176,24 +169,24 @@ impl Texture {
                                                             vk::ImageUsageFlags::SAMPLED,
                                                         vk::MemoryPropertyFlags::DEVICE_LOCAL,
                                                         vk::SampleCountFlags::TYPE_1);
-        transition_image_layout(logical_layer, command_pool, texture_image,
+        transition_image_layout(core, command_pool, texture_image,
                                 vk::Format::R8G8B8A8_SRGB, vk::ImageLayout::UNDEFINED,
                                 vk::ImageLayout::TRANSFER_DST_OPTIMAL, mip_levels);
-        copy_buffer_to_image(logical_layer, command_pool, img_buf, texture_image,
+        copy_buffer_to_image(core, command_pool, img_buf, texture_image,
                              img.width(), img.height());
         // transition_image_layout(logical_layer, command_pool, texture_image,
         //                         vk::Format::R8G8B8A8_SRGB,
         //                         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         //                         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL, mip_levels);
-        generate_mip_maps(core, logical_layer, physical_layer, command_pool, texture_image,
+        generate_mip_maps(core, command_pool, texture_image,
                           vk::Format::R8G8B8A8_SRGB, img.width(),
                           img.height(), mip_levels);
 
-        let texture_image_view = create_texture_image_view(logical_layer, texture_image, mip_levels);
+        let texture_image_view = create_texture_image_view(core, texture_image, mip_levels);
 
         unsafe {
-            logical_layer.logical_device.destroy_buffer(img_buf, None);
-            logical_layer.logical_device.free_memory(img_mem, None);
+            core.logical_device.destroy_buffer(img_buf, None);
+            core.logical_device.free_memory(img_mem, None);
         }
 
         Texture {
@@ -204,11 +197,11 @@ impl Texture {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, core: &VkCore) {
         unsafe {
-            logical_layer.logical_device.destroy_image_view(self.view, None);
-            logical_layer.logical_device.destroy_image(self.image, None);
-            logical_layer.logical_device.free_memory(self.mem, None);
+            core.logical_device.destroy_image_view(self.view, None);
+            core.logical_device.destroy_image(self.image, None);
+            core.logical_device.free_memory(self.mem, None);
         }
     }
 }

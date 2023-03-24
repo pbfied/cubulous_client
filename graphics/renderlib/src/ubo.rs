@@ -2,12 +2,10 @@ use std::mem;
 // use std::time::Instant;
 
 use ash::vk;
-use crate::core::Core;
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
 use cgmath::{Matrix4, Deg, Point3, Vector3, perspective};
-use crate::gpu_buffer::{create_buffer, GpuBuffer};
+use crate::gpu_buffer::{create_buffer};
 use crate::render_target::RenderTarget;
+use crate::vkcore::VkCore;
 
 // Remember to align fields according to the Vulkan specification
 #[repr(C)]
@@ -26,7 +24,7 @@ pub struct  UniformBuffer {
 }
 
 impl UniformBuffer {
-    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, max_frames: usize) -> UniformBuffer {
+    pub fn new(core: &VkCore, max_frames: usize) -> UniformBuffer {
         let buffer_size: vk::DeviceSize = mem::size_of::<UniformBufferObject>() as vk::DeviceSize;
         // let start_time = Instant::now();
         let mut uniform_buffer: UniformBuffer = UniformBuffer {
@@ -37,8 +35,7 @@ impl UniformBuffer {
         };
 
         for _ in 0..max_frames {
-            let (buf_mem, buffer) = create_buffer(core, physical_layer, logical_layer, buffer_size,
-                                                  vk::BufferUsageFlags::UNIFORM_BUFFER,
+            let (buf_mem, buffer) = create_buffer(core, buffer_size, vk::BufferUsageFlags::UNIFORM_BUFFER,
                                                   vk::MemoryPropertyFlags::HOST_COHERENT |
                                                       vk::MemoryPropertyFlags::HOST_VISIBLE);
             uniform_buffer.mem.push(buf_mem);
@@ -46,11 +43,8 @@ impl UniformBuffer {
 
             let dev_memory: *mut UniformBufferObject;
             unsafe {
-                dev_memory = logical_layer.logical_device
-                    .map_memory(buf_mem,
-                                0,
-                                buffer_size,
-                                vk::MemoryMapFlags::empty())
+                dev_memory = core.logical_device
+                    .map_memory(buf_mem, 0, buffer_size, vk::MemoryMapFlags::empty())
                     .unwrap() as *mut UniformBufferObject;
             }
             uniform_buffer.mapped.push(dev_memory);
@@ -82,11 +76,11 @@ impl UniformBuffer {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, core: &VkCore) {
         for (buf, mem) in self.data.iter().zip(self.mem.iter()) {
             unsafe {
-                logical_layer.logical_device.destroy_buffer(*buf, None);
-                logical_layer.logical_device.free_memory(*mem, None);
+                core.logical_device.destroy_buffer(*buf, None);
+                core.logical_device.free_memory(*mem, None);
             }
         }
     }

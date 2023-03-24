@@ -7,8 +7,8 @@ use std::mem;
 use ash::vk;
 use ash::vk::PipelineLayoutCreateFlags;
 
-use crate::logical_layer::LogicalLayer;
 use crate::vertex::Vertex;
+use crate::vkcore::VkCore;
 
 fn load_shader(path: &str) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
@@ -24,7 +24,7 @@ fn load_shader(path: &str) -> Result<Vec<u8>, String> {
 }
 
 
-fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
+fn load_all_shaders(core: &VkCore) -> Vec<vk::ShaderModule> {
     let shader_paths = ["graphics/shaders/spv/vert.spv", "graphics/shaders/spv/frag.spv"];
 
     let mut shader_modules: Vec<vk::ShaderModule> = Vec::with_capacity(shader_paths.len());
@@ -39,14 +39,14 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
             _marker: PhantomData
         };
         shader_modules.push(unsafe {
-            logical_layer.logical_device.create_shader_module(&shader_create_info, None).unwrap()
+            core.logical_device.create_shader_module(&shader_create_info, None).unwrap()
         });
     }
 
     shader_modules
 }
 
-fn setup_pipeline_layout(logical_layer: &LogicalLayer, layout: vk::DescriptorSetLayout) -> vk::PipelineLayout  {
+fn setup_pipeline_layout(core: &VkCore, layout: vk::DescriptorSetLayout) -> vk::PipelineLayout  {
     let ubo_layout_binding_arr = [layout];
 
     let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo::default()
@@ -54,7 +54,7 @@ fn setup_pipeline_layout(logical_layer: &LogicalLayer, layout: vk::DescriptorSet
         .flags(PipelineLayoutCreateFlags::empty());
 
     unsafe {
-        logical_layer.logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap()
+        core.logical_device.create_pipeline_layout(&pipeline_layout_create_info, None).unwrap()
     }
 }
 
@@ -64,7 +64,7 @@ pub struct RasterPipeline {
 }
 
 impl RasterPipeline {
-    pub fn new(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
+    pub fn new(core: &VkCore, render_pass: vk::RenderPass,
                layout: vk::DescriptorSetLayout, msaa_samples: vk::SampleCountFlags) -> RasterPipeline {
         fn setup_pipeline_stages(shader_modules: &Vec<vk::ShaderModule>) -> Vec<vk::PipelineShaderStageCreateInfo> {
             // Reminder that shader modules are in [vert, frag] order
@@ -84,7 +84,7 @@ impl RasterPipeline {
             create_info
         }
 
-        let shader_modules = load_all_shaders(logical_layer);
+        let shader_modules = load_all_shaders(core);
 
         let pipeline_stages = setup_pipeline_stages(&shader_modules);
 
@@ -148,7 +148,7 @@ impl RasterPipeline {
         let dynamic_state_create_info = vk::PipelineDynamicStateCreateInfo::default()
             .dynamic_states(&dynamic_states);
 
-        let pipeline_layout = setup_pipeline_layout(logical_layer, layout);
+        let pipeline_layout = setup_pipeline_layout(core, layout);
 
         let depth_stencil = vk::PipelineDepthStencilStateCreateInfo::default()
             .depth_test_enable(true)
@@ -172,12 +172,12 @@ impl RasterPipeline {
             .render_pass(render_pass)
             .subpass(0);
 
-        let pipelines = unsafe { logical_layer.logical_device.create_graphics_pipelines(vk::PipelineCache::null(),
+        let pipelines = unsafe { core.logical_device.create_graphics_pipelines(vk::PipelineCache::null(),
                                                                                    &[pipeline_info],
                                                                                    None).unwrap() };
 
         for &s in shader_modules.iter() {
-            unsafe { logical_layer.logical_device.destroy_shader_module(s, None) }
+            unsafe { core.logical_device.destroy_shader_module(s, None) }
         }
 
         RasterPipeline {
@@ -186,12 +186,12 @@ impl RasterPipeline {
         }
     }
 
-    pub fn destroy(&mut self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&mut self, core: &VkCore) {
         unsafe {
             for s in self.pipelines.iter() {
-                logical_layer.logical_device.destroy_pipeline(*s, None);
+                core.logical_device.destroy_pipeline(*s, None);
             }
-            logical_layer.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
+            core.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
         }
     }
 }

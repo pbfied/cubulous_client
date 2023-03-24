@@ -7,10 +7,8 @@ use ash::vk;
 use ash::extensions::khr;
 use ash::vk::Pipeline;
 use cgmath::Vector4;
-use crate::core::Core;
-use crate::gpu_buffer::{create_buffer, GpuBuffer};
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
+use renderlib::gpu_buffer::{create_buffer, GpuBuffer};
+use renderlib::vkcore::VkCore;
 
 const RAYGEN_IDX: usize = 0;
 const RAYHIT_IDX: usize = 1;
@@ -56,7 +54,7 @@ fn load_shader(path: &str) -> Result<Vec<u8>, String> {
     }
 }
 
-fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
+fn load_all_shaders(core: &VkCore) -> Vec<vk::ShaderModule> {
     let shader_paths = ["graphics/shaders/spv/rgen.spv", "graphics/shaders/spv/rchit.spv",
         "graphics/shaders/spv/rmiss.spv"];
 
@@ -72,7 +70,7 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
             _marker: PhantomData
         };
         shader_modules.push(unsafe {
-            logical_layer.logical_device.create_shader_module(&shader_create_info, None).unwrap()
+            core.logical_device.create_shader_module(&shader_create_info, None).unwrap()
         });
     }
 
@@ -80,21 +78,19 @@ fn load_all_shaders(logical_layer: &LogicalLayer) -> Vec<vk::ShaderModule> {
 }
 
 impl RtPipeline {
-    pub fn new(core: &Core, physical_layer: &PhysicalLayer, logical_layer: &LogicalLayer, command_pool: vk::CommandPool,
-               layouts: &Vec<vk::DescriptorSetLayout>) -> RtPipeline {
-        let instance = khr::RayTracingPipeline::new(&core.instance, &logical_layer.logical_device);
+    pub fn new(core: &VkCore, layouts: &Vec<vk::DescriptorSetLayout>) -> RtPipeline {
+        let instance = khr::RayTracingPipeline::new(&core.instance, &core.logical_device);
         let push_constant_ranges = [
             vk::PushConstantRange::default()
                 .offset(0)
                 .size(mem::size_of::<RtMissConstants>() as u32)
-                // .size(64)
                 .stage_flags(vk::ShaderStageFlags::MISS_KHR)
         ];
         let layout_create_info = vk::PipelineLayoutCreateInfo::default()
             .flags(vk::PipelineLayoutCreateFlags::empty())
             .set_layouts(layouts.as_slice())
             .push_constant_ranges(&push_constant_ranges);
-        let pipeline_layout = unsafe { logical_layer.logical_device.create_pipeline_layout(&layout_create_info, None)
+        let pipeline_layout = unsafe { core.logical_device.create_pipeline_layout(&layout_create_info, None)
             .unwrap() };
         let shader_groups = [
             vk::RayTracingShaderGroupCreateInfoKHR::default()
@@ -114,9 +110,9 @@ impl RtPipeline {
                 .general_shader(RAYMISS_IDX as u32)
                 .any_hit_shader(vk::SHADER_UNUSED_KHR)
                 .intersection_shader(vk::SHADER_UNUSED_KHR)
-                .closest_hit_shader(vk::SHADER_UNUSED_KHR)
+                .closest_hit_shader(vk::SHADER_UNUSED_KHR),
         ];
-        let shader_modules = load_all_shaders(logical_layer);
+        let shader_modules = load_all_shaders(core);
         let stage_create_info = [
             vk::PipelineShaderStageCreateInfo::default()
                 .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
@@ -129,7 +125,7 @@ impl RtPipeline {
             vk::PipelineShaderStageCreateInfo::default()
                 .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
                 .stage(vk::ShaderStageFlags::MISS_KHR)
-                .module(shader_modules[RAYMISS_IDX])
+                .module(shader_modules[RAYMISS_IDX]),
             ];
         let create_info = [
             vk::RayTracingPipelineCreateInfoKHR::default()
@@ -146,7 +142,7 @@ impl RtPipeline {
                                                   &create_info, None).unwrap()
         };
 
-        let rt_properties = unsafe { khr::RayTracingPipeline::get_properties(&core.instance, physical_layer.physical_device) };
+        let rt_properties = unsafe { khr::RayTracingPipeline::get_properties(&core.instance, core.physical_device) };
 
         // Note that each shader table group is made up of one handle for each shader within the group
         // Handles have alignment requirements
@@ -162,14 +158,14 @@ impl RtPipeline {
         let sbt_size = raygen_group_size + rmiss_group_size + rhit_group_size + rcall_group_size;
 
         // Should probably replace with a device local buffer later for draw indirect calls
-        let (sbt_mem, sbt_buf) = create_buffer(core, physical_layer, logical_layer, sbt_size,
+        let (sbt_mem, sbt_buf) = create_buffer(core, sbt_size,
                                                vk::BufferUsageFlags::SHADER_BINDING_TABLE_KHR |
             vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS | vk::BufferUsageFlags::TRANSFER_SRC,
                                     vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
         let addr_info = vk::BufferDeviceAddressInfo::default()
             .buffer(sbt_buf);
         let sbt_buf_addr = unsafe {
-            logical_layer.logical_device.get_buffer_device_address(&addr_info)
+            core.logical_device.get_buffer_device_address(&addr_info)
         };
 
         // The Vulkan spec states that the raygen handle stride must be equal to its group size
@@ -179,13 +175,13 @@ impl RtPipeline {
             .size(raygen_group_size as vk::DeviceSize)
             .device_address(sbt_buf_addr)
             .stride(raygen_handle_stride as vk::DeviceSize);
-        let raymiss_addr_region = vk::StridedDeviceAddressRegionKHR::default()
-            .size(rmiss_group_size as vk::DeviceSize)
-            .device_address(sbt_buf_addr + raygen_group_size as vk::DeviceSize)
-            .stride(handle_size as vk::DeviceSize);
         let rayhit_addr_region = vk::StridedDeviceAddressRegionKHR::default()
             .size(rhit_group_size as vk::DeviceSize)
-            .device_address(sbt_buf_addr + raygen_group_size + rmiss_group_size)
+            .device_address(sbt_buf_addr + raygen_group_size)
+            .stride(handle_size as vk::DeviceSize);
+        let raymiss_addr_region = vk::StridedDeviceAddressRegionKHR::default()
+            .size(rmiss_group_size as vk::DeviceSize)
+            .device_address(sbt_buf_addr + raygen_group_size + rhit_group_size)
             .stride(handle_size as vk::DeviceSize);
         let raycallable_addr_region = vk::StridedDeviceAddressRegionKHR::default()
             .size(0);
@@ -199,7 +195,7 @@ impl RtPipeline {
 
         // Copy shaders to the shader binding table
         unsafe {
-            let mut sbt_mapped_memory = logical_layer.logical_device
+            let mut sbt_mapped_memory = core.logical_device
                 .map_memory(sbt_mem,
                             0,
                             sbt_size,
@@ -211,21 +207,21 @@ impl RtPipeline {
                 usize);
             sbt_mapped_memory = sbt_mapped_memory.add(raygen_addr_region.stride as usize);
             handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
-            for _ in 0..RAYMISS_COUNT {
-                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
-                handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
-                sbt_mapped_memory = sbt_mapped_memory.add(raymiss_addr_region.stride as usize);
-            }
             for _ in 0..RAYHIT_COUNT {
                 sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
                 handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
                 sbt_mapped_memory = sbt_mapped_memory.add(rayhit_addr_region.stride as usize);
             }
-            logical_layer.logical_device.unmap_memory(sbt_mem);
+            for _ in 0..RAYMISS_COUNT {
+                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
+                handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
+                sbt_mapped_memory = sbt_mapped_memory.add(raymiss_addr_region.stride as usize);
+            }
+            core.logical_device.unmap_memory(sbt_mem);
         }
 
         for &s in shader_modules.iter() {
-            unsafe { logical_layer.logical_device.destroy_shader_module(s, None) }
+            unsafe { core.logical_device.destroy_shader_module(s, None) }
         }
 
         RtPipeline {
@@ -241,14 +237,14 @@ impl RtPipeline {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, core: &VkCore) {
         unsafe {
             for s in self.pipelines.iter() {
-                logical_layer.logical_device.destroy_pipeline(*s, None);
+                core.logical_device.destroy_pipeline(*s, None);
             }
-            logical_layer.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
-            logical_layer.logical_device.destroy_buffer(self.sbt_buf, None);
-            logical_layer.logical_device.free_memory(self.sbt_mem, None);
+            core.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
+            core.logical_device.destroy_buffer(self.sbt_buf, None);
+            core.logical_device.free_memory(self.sbt_mem, None);
         }
     }
 }

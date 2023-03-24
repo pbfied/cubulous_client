@@ -1,9 +1,9 @@
 use ash::vk;
 
-use crate::logical_layer::LogicalLayer;
 use crate::render_target::RenderTarget;
+use crate::vkcore::VkCore;
 
-pub fn setup_render_pass(logical_layer: &LogicalLayer, render_target: &RenderTarget,
+pub fn setup_render_pass(core: &VkCore, render_target: &RenderTarget,
                          depth_format: vk::Format, samples: vk::SampleCountFlags) -> vk::RenderPass {
     let attachment_desc = vk::AttachmentDescription::default() // Color attachment
         .format(render_target.surface_format) // Should match the format of swap chain images
@@ -75,9 +75,9 @@ pub fn setup_render_pass(logical_layer: &LogicalLayer, render_target: &RenderTar
         .subpasses(&subpass_array)
         .dependencies(&dependencies);
 
-    unsafe {logical_layer.logical_device.create_render_pass(&render_pass_create_info, None).unwrap() }
+    unsafe {core.logical_device.create_render_pass(&render_pass_create_info, None).unwrap() }
 }
 
-pub fn destroy_render_pass(logical_layer: &LogicalLayer, render_pass: vk::RenderPass) {
-    unsafe { logical_layer.logical_device.destroy_render_pass(render_pass, None) };
+pub fn destroy_render_pass(core: &VkCore, render_pass: vk::RenderPass) {
+    unsafe { core.logical_device.destroy_render_pass(render_pass, None) };
 }

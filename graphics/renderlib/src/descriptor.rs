@@ -1,10 +1,10 @@
 use ash::vk;
-use crate::logical_layer::LogicalLayer;
 use crate::texture::Texture;
 use crate::ubo::{UniformBuffer, UniformBufferObject};
+use crate::vkcore::VkCore;
 
 // Use Ash builtin to destroy the descriptor set layout
-pub fn create_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
+pub fn create_descriptor_set_layout(core: &VkCore) -> vk::DescriptorSetLayout {
     let transform_binding = vk::DescriptorSetLayoutBinding::default()
         .binding(0)
         .descriptor_type(vk::DescriptorType::UNIFORM_BUFFER)
@@ -24,7 +24,7 @@ pub fn create_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::Descrip
         .flags(vk::DescriptorSetLayoutCreateFlags::empty());
 
     unsafe {
-        logical_layer.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
+        core.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
     }
 }
 
@@ -35,7 +35,7 @@ pub struct Descriptor {
 }
 
 impl Descriptor {
-    pub fn new(logical_layer: &LogicalLayer, ubo: &UniformBuffer, sampler: vk::Sampler,
+    pub fn new(core: &VkCore, ubo: &UniformBuffer, sampler: vk::Sampler,
                texture: &Texture, layout: vk::DescriptorSetLayout, max_frames: usize) -> Descriptor {
         // Build descriptor pool
         let transform_pool_size = vk::DescriptorPoolSize::default()
@@ -49,7 +49,7 @@ impl Descriptor {
         let pool_create_info = vk::DescriptorPoolCreateInfo::default()
             .max_sets(max_frames as u32)
             .pool_sizes(&pool_size);
-        let pool = unsafe { logical_layer.logical_device.create_descriptor_pool(&pool_create_info, None).unwrap() };
+        let pool = unsafe { core.logical_device.create_descriptor_pool(&pool_create_info, None).unwrap() };
 
         let mut layout_vec: Vec<vk::DescriptorSetLayout> = Vec::new();
         for _ in 0..max_frames {
@@ -60,7 +60,7 @@ impl Descriptor {
         let allocate_info = vk::DescriptorSetAllocateInfo::default()
             .descriptor_pool(pool)
             .set_layouts(layout_vec.as_slice());
-        let sets: Vec<vk::DescriptorSet> = unsafe { logical_layer.logical_device.allocate_descriptor_sets(&allocate_info).unwrap() };
+        let sets: Vec<vk::DescriptorSet> = unsafe { core.logical_device.allocate_descriptor_sets(&allocate_info).unwrap() };
 
         for (set, buffer) in sets.iter().zip(ubo.data.iter()) {
             let transform_buffer_info = vk::DescriptorBufferInfo::default()
@@ -90,7 +90,7 @@ impl Descriptor {
             let descriptor_write = [transform_desc_write, image_info_write];
 
             unsafe {
-                logical_layer.logical_device.update_descriptor_sets(&descriptor_write, &[]);
+                core.logical_device.update_descriptor_sets(&descriptor_write, &[]);
             }
         }
 
@@ -101,10 +101,10 @@ impl Descriptor {
         }
     }
 
-    pub fn destroy(&self, logical_layer: &LogicalLayer) {
+    pub fn destroy(&self, core: &VkCore) {
         unsafe {
-            logical_layer.logical_device.destroy_descriptor_pool(self.pool, None);
-            logical_layer.logical_device.destroy_descriptor_set_layout(self.layout, None);
+            core.logical_device.destroy_descriptor_pool(self.pool, None);
+            core.logical_device.destroy_descriptor_set_layout(self.layout, None);
 
         }
     }

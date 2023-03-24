@@ -1,9 +1,9 @@
 use ash::vk;
 
-use crate::logical_layer::LogicalLayer;
 use crate::render_target::RenderTarget;
+use crate::vkcore::VkCore;
 
-pub fn setup_frame_buffers(logical_layer: &LogicalLayer, render_pass: vk::RenderPass,
+pub fn setup_frame_buffers(core: &VkCore, render_pass: vk::RenderPass,
                            render_target: &RenderTarget, depth_view: vk::ImageView,
                            color_view: vk::ImageView) -> Vec<vk::Framebuffer> {
     let mut frame_buffers: Vec<vk::Framebuffer> = Vec::with_capacity(render_target.image_views.len());
@@ -16,14 +16,14 @@ pub fn setup_frame_buffers(logical_layer: &LogicalLayer, render_pass: vk::Render
             .height(render_target.extent.height)
             .layers(1);
 
-        unsafe { frame_buffers.push(logical_layer.logical_device.create_framebuffer(&create_info, None).unwrap()) }
+        unsafe { frame_buffers.push(core.logical_device.create_framebuffer(&create_info, None).unwrap()) }
     }
 
     frame_buffers
 }
 
-pub fn destroy_frame_buffers(logical_layer: &LogicalLayer, frame_buffers: &Vec<vk::Framebuffer>) {
+pub fn destroy_frame_buffers(core: &VkCore, frame_buffers: &Vec<vk::Framebuffer>) {
     for f in frame_buffers.iter() {
-        unsafe { logical_layer.logical_device.destroy_framebuffer(*f, None) };
+        unsafe { core.logical_device.destroy_framebuffer(*f, None) };
     }
 }

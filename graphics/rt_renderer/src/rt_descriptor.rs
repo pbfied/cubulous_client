@@ -1,12 +1,12 @@
-use ash::extensions::khr::AccelerationStructure;
 use ash::vk;
 use ash::vk::AccelerationStructureKHR;
-use crate::logical_layer::LogicalLayer;
+use renderlib::vkcore::VkCore;
 use crate::rt_accel::RtTlas;
 use crate::rt_canvas::RtCanvas;
-use crate::rt_ubo::{RtUniformBuffer, RtUniformBufferObject};
+use crate::rt_pipeline::RtMissConstants;
+use crate::rt_ubo::{RtPerFrameUbo, RtUniformBuffer};
 
-pub fn create_per_frame_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
+pub fn create_per_frame_descriptor_set_layout(core: &VkCore) -> vk::DescriptorSetLayout {
     let binding_arr = [
         vk::DescriptorSetLayoutBinding::default()
             .binding(0)
@@ -30,11 +30,11 @@ pub fn create_per_frame_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
         .flags(vk::DescriptorSetLayoutCreateFlags::empty());
 
     unsafe {
-        logical_layer.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
+        core.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
     }
 }
 
-pub fn create_singleton_descriptor_set_layout(logical_layer: &LogicalLayer) -> vk::DescriptorSetLayout {
+pub fn create_singleton_descriptor_set_layout(core: &VkCore) -> vk::DescriptorSetLayout {
     let binding_arr = [
         vk::DescriptorSetLayoutBinding::default()
             .binding(0)
@@ -48,31 +48,30 @@ pub fn create_singleton_descriptor_set_layout(logical_layer: &LogicalLayer) -> v
         .flags(vk::DescriptorSetLayoutCreateFlags::empty());
 
     unsafe {
-        logical_layer.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
+        core.logical_device.create_descriptor_set_layout(&layout, None).unwrap()
     }
 }
 
-pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, tlas: &Vec<RtTlas>,
-                              per_frame_data: &RtUniformBuffer, per_frame_layout: vk::DescriptorSetLayout,//  singleton: vk::DescriptorSetLayout,
-                              max_frames: usize) -> (Vec<vk::DescriptorSet>, vk::DescriptorPool) {
+pub fn create_per_frame_descriptor_sets(core: &VkCore, canvas: &RtCanvas, tlas: &Vec<RtTlas>, per_frame_data: &RtUniformBuffer<RtPerFrameUbo>, per_frame_layout: vk::DescriptorSetLayout,
+                                        max_frames: usize) -> (Vec<vk::DescriptorSet>, vk::DescriptorPool) { // singleton: vk::DescriptorSetLayout,
     let pool_sizes = [
         vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::STORAGE_IMAGE)
             .descriptor_count(max_frames as u32),
         vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::ACCELERATION_STRUCTURE_KHR)
-            .descriptor_count(1),
+            .descriptor_count(max_frames as u32),
         vk::DescriptorPoolSize::default()
             .ty(vk::DescriptorType::UNIFORM_BUFFER)
-            .descriptor_count(1)
+            .descriptor_count(max_frames as u32)
     ];
 
     let pool_create_info = vk::DescriptorPoolCreateInfo::default()
-        .max_sets((max_frames + 1) as u32)
+        .max_sets((max_frames) as u32)
         .pool_sizes(&pool_sizes);
 
     let descriptor_pool = unsafe {
-        logical_layer.logical_device.create_descriptor_pool(&pool_create_info, None).unwrap()
+        core.logical_device.create_descriptor_pool(&pool_create_info, None).unwrap()
     };
 
     let mut layout_vec: Vec<vk::DescriptorSetLayout> = Vec::new();
@@ -85,7 +84,7 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
         .descriptor_pool(descriptor_pool)
         .set_layouts(layout_vec.as_slice());
     let descriptor_sets = unsafe {
-        logical_layer.logical_device.allocate_descriptor_sets(&allocate_info).unwrap()
+        core.logical_device.allocate_descriptor_sets(&allocate_info).unwrap()
     };
 
     // Update the per frame descriptors
@@ -105,7 +104,7 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
         let transform_buffer_info = vk::DescriptorBufferInfo::default()
             .offset(0) // The Src buffer index to update from
             .buffer(per_frame_data.data[f]) // The Src buffer to update the descriptor set from
-            .range(std::mem::size_of::<RtUniformBufferObject>() as vk::DeviceSize);
+            .range(std::mem::size_of::<RtUniformBuffer<RtPerFrameUbo>>() as vk::DeviceSize);
         let buffer_info = [transform_buffer_info]; // Can also use VK_WHOLE_SIZE if updating the entire range
 
         let mut write_descriptor_set = [
@@ -130,7 +129,7 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
         ];
         write_descriptor_set[1].descriptor_count = 1; // Not set by push_next;
         unsafe {
-            logical_layer.logical_device.update_descriptor_sets(&write_descriptor_set, &[]);
+            core.logical_device.update_descriptor_sets(&write_descriptor_set, &[]);
         }
     }
 
@@ -153,15 +152,15 @@ pub fn create_descriptor_sets(logical_layer: &LogicalLayer, canvas: &RtCanvas, t
     (descriptor_sets, descriptor_pool)
 }
 
-pub fn destroy_descriptor_sets(logical_layer: &LogicalLayer, descriptor_set_layouts: &Vec<vk::DescriptorSetLayout>,
+pub fn destroy_descriptor_sets(core: &VkCore, descriptor_set_layouts: &Vec<vk::DescriptorSetLayout>,
                                descriptor_pool: vk::DescriptorPool) {
     for l in descriptor_set_layouts {
         unsafe {
-            logical_layer.logical_device.destroy_descriptor_set_layout(*l, None);
+            core.logical_device.destroy_descriptor_set_layout(*l, None);
         }
     }
     unsafe {
-        logical_layer.logical_device.destroy_descriptor_pool(descriptor_pool, None);
+         core.logical_device.destroy_descriptor_pool(descriptor_pool, None);
     }
 }
 

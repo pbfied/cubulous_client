@@ -2,9 +2,6 @@ use memoffset::offset_of;
 use std::mem;
 
 use ash::vk;
-use crate::core::Core;
-use crate::logical_layer::LogicalLayer;
-use crate::physical_layer::PhysicalLayer;
 
 #[repr(C)]
 #[derive(Clone, Debug, Copy)]

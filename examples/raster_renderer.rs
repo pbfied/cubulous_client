@@ -21,11 +21,8 @@ use renderlib::{
     texture::Texture,
     ubo::UniformBuffer
 };
-use renderlib::core::Core;
+use renderlib::vkcore::VkCore;
 use renderlib::gpu_buffer::GpuBuffer;
-use renderlib::logical_layer::LogicalLayer;
-use renderlib::physical_layer::PhysicalLayer;
-use renderlib::renderutils::create_common_vulkan_objs;
 
 pub const MAX_FRAMES_IN_FLIGHT: usize = 2;
 const MODEL_PATH: &str = "graphics/models/viking_room.obj";
