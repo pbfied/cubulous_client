@@ -104,7 +104,7 @@ pub fn create_per_frame_descriptor_sets(core: &VkCore, canvas: &RtCanvas, tlas: 
         let transform_buffer_info = vk::DescriptorBufferInfo::default()
             .offset(0) // The Src buffer index to update from
             .buffer(per_frame_data.data[f]) // The Src buffer to update the descriptor set from
-            .range(std::mem::size_of::<RtUniformBuffer<RtPerFrameUbo>>() as vk::DeviceSize);
+            .range(std::mem::size_of::<RtPerFrameUbo>() as vk::DeviceSize);
         let buffer_info = [transform_buffer_info]; // Can also use VK_WHOLE_SIZE if updating the entire range
 
         let mut write_descriptor_set = [

@@ -57,7 +57,7 @@ impl<T> RtUniformBuffer<T> {
     }
 
     pub fn set_mapped(&self, item: &[T], descriptor_idx: usize) {
-        unsafe { self.mapped[descriptor_idx].copy_from_nonoverlapping(item.as_ptr(), mem::size_of::<T>()) };
+        unsafe { self.mapped[descriptor_idx].copy_from_nonoverlapping(item.as_ptr(), item.len()) };
     }
 
     pub fn destroy(&self, core: &VkCore) {
