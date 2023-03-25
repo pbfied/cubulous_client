@@ -11,8 +11,8 @@ use renderlib::gpu_buffer::{create_buffer, GpuBuffer};
 use renderlib::vkcore::VkCore;
 
 const RAYGEN_IDX: usize = 0;
-const RAYHIT_IDX: usize = 2;
-const RAYMISS_IDX: usize = 1;
+const RAYHIT_IDX: usize = 1;
+const RAYMISS_IDX: usize = 2;
 
 const RAYHIT_COUNT: usize = 1;
 const RAYMISS_COUNT: usize = 1;
@@ -55,7 +55,7 @@ fn load_shader(path: &str) -> Result<Vec<u8>, String> {
 }
 
 fn load_all_shaders(core: &VkCore) -> Vec<vk::ShaderModule> {
-    let shader_paths = ["graphics/shaders/spv/rgen.spv", "graphics/shaders/spv/rmiss.spv", "graphics/shaders/spv/rchit.spv"];
+    let shader_paths = ["graphics/shaders/spv/rgen.spv", "graphics/shaders/spv/rchit.spv", "graphics/shaders/spv/rmiss.spv"];
 
     let mut shader_modules: Vec<vk::ShaderModule> = Vec::with_capacity(shader_paths.len());
     for sp in shader_paths.iter() {
@@ -98,18 +98,18 @@ impl RtPipeline {
                 .closest_hit_shader(vk::SHADER_UNUSED_KHR)
                 .intersection_shader(vk::SHADER_UNUSED_KHR)
                 .any_hit_shader(vk::SHADER_UNUSED_KHR),
-            vk::RayTracingShaderGroupCreateInfoKHR::default() // miss
-                .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
-                .general_shader(RAYMISS_IDX as u32)
-                .any_hit_shader(vk::SHADER_UNUSED_KHR)
-                .intersection_shader(vk::SHADER_UNUSED_KHR)
-                .closest_hit_shader(vk::SHADER_UNUSED_KHR),
             vk::RayTracingShaderGroupCreateInfoKHR::default()
                 .ty(vk::RayTracingShaderGroupTypeKHR::TRIANGLES_HIT_GROUP) // intersection
                 .any_hit_shader(vk::SHADER_UNUSED_KHR)
                 .general_shader(vk::SHADER_UNUSED_KHR)
                 .closest_hit_shader(RAYHIT_IDX as u32)
                 .intersection_shader(vk::SHADER_UNUSED_KHR),
+            vk::RayTracingShaderGroupCreateInfoKHR::default() // miss
+                .ty(vk::RayTracingShaderGroupTypeKHR::GENERAL)
+                .general_shader(RAYMISS_IDX as u32)
+                .any_hit_shader(vk::SHADER_UNUSED_KHR)
+                .intersection_shader(vk::SHADER_UNUSED_KHR)
+                .closest_hit_shader(vk::SHADER_UNUSED_KHR),
         ];
         let shader_modules = load_all_shaders(core);
         let stage_create_info = [
@@ -119,12 +119,12 @@ impl RtPipeline {
                 .module(shader_modules[RAYGEN_IDX]),
             vk::PipelineShaderStageCreateInfo::default()
                 .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
-                .stage(vk::ShaderStageFlags::MISS_KHR)
-                .module(shader_modules[RAYMISS_IDX]),
-            vk::PipelineShaderStageCreateInfo::default()
-                .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
                 .stage(vk::ShaderStageFlags::CLOSEST_HIT_KHR)
                 .module(shader_modules[RAYHIT_IDX]),
+            vk::PipelineShaderStageCreateInfo::default()
+                .name(CStr::from_bytes_with_nul(b"main\0").unwrap())
+                .stage(vk::ShaderStageFlags::MISS_KHR)
+                .module(shader_modules[RAYMISS_IDX]),
             ];
         let create_info = [
             vk::RayTracingPipelineCreateInfoKHR::default()
@@ -176,11 +176,11 @@ impl RtPipeline {
             .stride(raygen_handle_stride as vk::DeviceSize);
         let raymiss_addr_region = vk::StridedDeviceAddressRegionKHR::default()
             .size(rmiss_group_size as vk::DeviceSize)
-            .device_address(sbt_buf_addr + raygen_group_size)
+            .device_address(sbt_buf_addr + raygen_group_size + rhit_group_size)
             .stride(handle_size as vk::DeviceSize);
         let rayhit_addr_region = vk::StridedDeviceAddressRegionKHR::default()
             .size(rhit_group_size as vk::DeviceSize)
-            .device_address(sbt_buf_addr + raygen_group_size + rmiss_group_size)
+            .device_address(sbt_buf_addr + raygen_group_size)
             .stride(handle_size as vk::DeviceSize);
         let raycallable_addr_region = vk::StridedDeviceAddressRegionKHR::default()
             .size(0);
@@ -206,15 +206,15 @@ impl RtPipeline {
                 usize);
             sbt_mapped_memory = sbt_mapped_memory.add(raygen_addr_region.stride as usize);
             handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
-            for _ in 0..RAYMISS_COUNT {
-                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
-                handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
-                sbt_mapped_memory = sbt_mapped_memory.add(raymiss_addr_region.stride as usize);
-            }
             for _ in 0..RAYHIT_COUNT {
                 sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
                 handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
                 sbt_mapped_memory = sbt_mapped_memory.add(rayhit_addr_region.stride as usize);
+            }
+            for _ in 0..RAYMISS_COUNT {
+                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
+                handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
+                sbt_mapped_memory = sbt_mapped_memory.add(raymiss_addr_region.stride as usize);
             }
             core.logical_device.unmap_memory(sbt_mem);
         }
