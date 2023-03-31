@@ -12,8 +12,7 @@ members = [
 ]
 
 [dependencies]
-ash = { path = "../ash/ash", default-features = false, features = ["loaded", "debug"] }
-ash-window = { path = "../ash/ash-window" }
+ash = { version = "0.37.2", default-features = false, features = ["loaded", "debug"] }
 renderlib = { path = "graphics/renderlib" }
 rt_renderer = { path= "graphics/rt_renderer" }
 cgmath = "0.18"

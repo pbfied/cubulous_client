@@ -209,17 +209,20 @@ impl RtPipeline {
             // Copy the raygen, always the first entry. Note that padding bytes are not copied
             sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as
                 usize);
-            sbt_mapped_memory = sbt_mapped_memory.add(raygen_addr_region.stride as usize);
             handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
+
+            let mut raymiss_start = sbt_mapped_memory.add(raygen_group_size as usize);
             for _ in 0..RAYMISS_COUNT {
-                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
+                raymiss_start.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as
+                    usize);
                 handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
-                sbt_mapped_memory = sbt_mapped_memory.add(raymiss_addr_region.stride as usize);
+                raymiss_start = raymiss_start.add(raymiss_addr_region.stride as usize);
             }
+            let mut rayhit_start = sbt_mapped_memory.add((raygen_group_size + rmiss_group_size) as usize);
             for _ in 0..RAYHIT_COUNT {
-                sbt_mapped_memory.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
+                rayhit_start.copy_from_nonoverlapping(handles_ptr, rt_properties.shader_group_handle_size as usize);
                 handles_ptr = handles_ptr.add(rt_properties.shader_group_handle_size as usize);
-                sbt_mapped_memory = sbt_mapped_memory.add(rayhit_addr_region.stride as usize);
+                rayhit_start = rayhit_start.add(rayhit_addr_region.stride as usize);
             }
             core.logical_device.unmap_memory(sbt_mem);
         }
