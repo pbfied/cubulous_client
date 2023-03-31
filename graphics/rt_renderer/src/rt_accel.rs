@@ -3,6 +3,7 @@ use std::time::Instant;
 use ash::extensions::khr;
 use ash::extensions::khr::AccelerationStructure;
 use ash::vk;
+use cgmath::{Point3, Vector3};
 use renderlib::gpu_buffer::GpuBuffer;
 use renderlib::single_time::{begin_single_time_commands, end_single_time_commands};
 use renderlib::vkcore::VkCore;
@@ -534,6 +535,11 @@ const OUTWARD_SHELL: [u32; 4096] = [
 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 ];
 
+pub struct RtPerInstanceData {
+    pub offset: Vector3<f32>,
+    pub blas_index: usize
+}
+
 pub struct RtAccel {
     scratch_size: vk::DeviceSize,
     accel_buf: GpuBuffer,
@@ -730,12 +736,12 @@ impl RtAccel {
     }
 
     pub fn new_tlas(core: &VkCore, acceleration_instance: &AccelerationStructure, command_pool: vk::CommandPool,
-                    blas: &[&RtBlas]) -> RtTlas {
-        let mut geometries: Vec<vk::AccelerationStructureGeometryKHR> = Vec::with_capacity(blas.len());
+                    blas: &[&RtBlas], per_blas_data: &[RtPerInstanceData]) -> RtTlas {
         // TODO Use a compute shader to construct BLAS instance arrays with different transforms
-        let mut blas_instance_vec: Vec<GpuBuffer> = Vec::new();
-        for b in blas.iter() {
-            let blas_addr_info = vk::AccelerationStructureDeviceAddressInfoKHR::default().acceleration_structure(b.acceleration_structure);
+        let mut instance_vec: Vec<vk::AccelerationStructureInstanceKHR> = Vec::with_capacity(per_blas_data.len());
+        for d in per_blas_data.iter() { // Iterate through each instance
+            let blas_addr_info = vk::AccelerationStructureDeviceAddressInfoKHR::default()
+                .acceleration_structure(blas[d.blas_index].acceleration_structure);
             let blas_addr = unsafe { acceleration_instance.get_acceleration_structure_device_address(&blas_addr_info) };
             let blas_ref = vk::AccelerationStructureReferenceKHR {
                 device_handle: blas_addr
@@ -743,45 +749,53 @@ impl RtAccel {
             let index_and_mask = vk::Packed24_8::new(0, 0xFF); // No index data for now, assert all cull mask bits
             let offset_and_flags = vk::Packed24_8::new(0, MANUAL_CULL_DISABLE);
             let transform_data = vk::TransformMatrixKHR { // Identity, no translation and no transform
-                matrix: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]
+                matrix: [1.0, 0.0, 0.0, d.offset.x, 0.0, 1.0, 0.0, d.offset.y, 0.0, 0.0, 1.0, d.offset.z]
             };
-            let blas_instances = [
-                vk::AccelerationStructureInstanceKHR {
-                    transform: transform_data,
-                    instance_custom_index_and_mask: index_and_mask,
-                    instance_shader_binding_table_record_offset_and_flags: offset_and_flags,
-                    acceleration_structure_reference: blas_ref
-                }
-            ];
 
-            let blas_instance_buf = GpuBuffer::new_initialized(core, command_pool,
-                                                               vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
-                                                                   | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, &blas_instances,
-                                                               vk::MemoryPropertyFlags::DEVICE_LOCAL);
-            let blas_instance_addr = vk::DeviceOrHostAddressConstKHR {
-                device_address: blas_instance_buf.get_device_address(core)
-            };
-            let tlas_geometry_instances = vk::AccelerationStructureGeometryInstancesDataKHR::default()
-                .data(blas_instance_addr)
-                .array_of_pointers(false);
-            let tlas_geometry_data = vk::AccelerationStructureGeometryDataKHR {
-                instances: tlas_geometry_instances
-            };
-            let tlas_geometry = vk::AccelerationStructureGeometryKHR::default()
-                .geometry_type(vk::GeometryTypeKHR::INSTANCES)
-                .geometry(tlas_geometry_data);
-            geometries.push(tlas_geometry);
-            blas_instance_vec.push(blas_instance_buf);
+            instance_vec.push(vk::AccelerationStructureInstanceKHR {
+                transform: transform_data,
+                instance_custom_index_and_mask: index_and_mask,
+                instance_shader_binding_table_record_offset_and_flags: offset_and_flags,
+                acceleration_structure_reference: blas_ref
+            })
         }
+            // let blas_instances = [
+            //     vk::AccelerationStructureInstanceKHR {
+            //         transform: transform_data,
+            //         instance_custom_index_and_mask: index_and_mask,
+            //         instance_shader_binding_table_record_offset_and_flags: offset_and_flags,
+            //         acceleration_structure_reference: blas_ref
+            //     }
+            // ];
+
+        let instance_buf = GpuBuffer::new_initialized(core, command_pool,
+                                                               vk::BufferUsageFlags::ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_KHR
+                                                                   | vk::BufferUsageFlags::SHADER_DEVICE_ADDRESS, instance_vec.as_slice(),
+                                                               vk::MemoryPropertyFlags::DEVICE_LOCAL);
+
+
+        let instance_addr = vk::DeviceOrHostAddressConstKHR {
+            device_address: instance_buf.get_device_address(core)
+        };
+        let tlas_geometry_instances = vk::AccelerationStructureGeometryInstancesDataKHR::default()
+            .data(instance_addr)
+            .array_of_pointers(false);
+        let tlas_geometry_data = vk::AccelerationStructureGeometryDataKHR {
+            instances: tlas_geometry_instances
+        };
+        let tlas_geometry = [vk::AccelerationStructureGeometryKHR::default()
+                .geometry_type(vk::GeometryTypeKHR::INSTANCES)
+                .geometry(tlas_geometry_data)
+        ];
 
         let mut tlas_build_info = vk::AccelerationStructureBuildGeometryInfoKHR::default()
             .flags(vk::BuildAccelerationStructureFlagsKHR::PREFER_FAST_TRACE)
             .ty(vk::AccelerationStructureTypeKHR::TOP_LEVEL)
             .mode(vk::BuildAccelerationStructureModeKHR::BUILD)
-            .geometries(geometries.as_slice());
+            .geometries(&tlas_geometry);
         let tlas_build_size = unsafe {
             acceleration_instance.get_acceleration_structure_build_sizes(vk::AccelerationStructureBuildTypeKHR::DEVICE,
-                                                                         &tlas_build_info, &[geometries.len() as u32])
+                                                                         &tlas_build_info, &[instance_vec.len() as u32])
         };
         let tlas_scratch_size = tlas_build_size.build_scratch_size;
         let scratch_buf = GpuBuffer::new(core, tlas_scratch_size,
@@ -812,7 +826,7 @@ impl RtAccel {
 
         let build_range_info_l1 = [
             vk::AccelerationStructureBuildRangeInfoKHR::default()
-                .primitive_count(blas.len() as u32)
+                .primitive_count(per_blas_data.len() as u32)
                 .primitive_offset(0)
                 .transform_offset(0)
         ];
@@ -829,10 +843,7 @@ impl RtAccel {
         let end_time = Instant::now();
         let build_time = end_time.duration_since(start_time).as_nanos();
         println!("TLAS build time: {build_time}");
-
-        for i in blas_instance_vec {
-            i.destroy(core);
-        }
+        instance_buf.destroy(core);
 
         RtTlas {
             scratch_size: tlas_scratch_size,
@@ -855,129 +866,136 @@ pub fn create_acceleration_structures(core: &VkCore, command_pool: vk::CommandPo
     // 0    1 - back    4   5
     // 2    3           6   7
     let acceleration_instance = AccelerationStructure::new(&core.instance, &core.logical_device);
+    //
+    // let indices: [RtIndex; 36] = [
+    //     0, 1, 2, // back
+    //     1, 3, 2,
+    //     0, 1, 5, // top
+    //     0, 5, 4,
+    //     1, 3, 7, // right
+    //     1, 7, 5,
+    //     2, 3, 7, // bottom
+    //     2, 7, 6,
+    //     0, 4, 6, // left
+    //     0, 6, 2,
+    //     4, 5, 7, // front
+    //     4, 7, 6
+    // ];
+    // let vertices: [RtVertex; 24] = [
+    //     -0.5, 0.5, -0.5,
+    //     0.5, 0.5, -0.5,
+    //     -0.5, -0.5, -0.5,
+    //     0.5, -0.5, -0.5,
+    //     -0.5, 0.5, 0.5,
+    //     0.5, 0.5, 0.5,
+    //     -0.5, -0.5, 0.5,
+    //     0.5, -0.5, 0.5,
+    // ];
 
-    let indices: [RtIndex; 36] = [
-        0, 1, 2, // back
-        1, 3, 2,
-        0, 1, 5, // top
-        0, 5, 4,
-        1, 3, 7, // right
-        1, 7, 5,
-        2, 3, 7, // bottom
-        2, 7, 6,
-        0, 4, 6, // left
-        0, 6, 2,
-        4, 5, 7, // front
-        4, 7, 6
-    ];
-    let vertices: [RtVertex; 24] = [
-        -0.5, 0.5, -0.5,
-        0.5, 0.5, -0.5,
-        -0.5, -0.5, -0.5,
-        0.5, -0.5, -0.5,
-        -0.5, 0.5, 0.5,
-        0.5, 0.5, 0.5,
-        -0.5, -0.5, 0.5,
-        0.5, -0.5, 0.5,
-    ];
-    //
-    // let vertex_count = 17usize.pow(3);
-    // let mut vertices = Vec::<f32>::with_capacity(vertex_count * 3);
-    // for n in 0..vertex_count {
-    //     let x = (n % 17) as f32;
-    //     let y = ((n / 17) % 17) as f32;
-    //     let z = (n / 289) as f32;
-    //     vertices.push(x);
-    //     vertices.push(y);
-    //     vertices.push(z);
-    // }
-    //
-    // let mut indices: Vec<RtIndex> = Vec::new();
-    // for (m, id) in OUTWARD_SHELL[0..2].iter().enumerate() {
-    //     if *id > 0 {
-    // // let n = 0;
-    //         let n = m;
-    //         // let x = (n % 16) as RtIndex;
-    //         // let y = ((n / 16) % 16) as RtIndex;
-    //         // let z = ((n / 256) / 256) as RtIndex;
-    //         let v_idx = (n + n / 16 + (n / 256) * 17) as RtIndex;
-    //
-    //         // z is up I think
-    //         let corners: [RtIndex; 8] = [v_idx, // lowest xyz
-    //             (v_idx + 1), // (x+1)yz
-    //             (v_idx + 17), // x(y+1)z
-    //             (v_idx + 289), // xy(z + 1)
-    //             (v_idx + 1 + 17), // (x+1)(y+1)z
-    //             (v_idx + 1 + 289), // (x+1)y(z+1)
-    //             (v_idx + 17 + 289), // x(y+1)(z+1)
-    //             (v_idx + 1 + 17 + 289) // (x+1)(y+1)(z+1)
-    //         ];
-    //         indices.push(corners[0]); // bottom -x face
-    //         indices.push(corners[2]);
-    //         indices.push(corners[3]);
-    //
-    //         indices.push(corners[3]); // top -x face
-    //         indices.push(corners[2]);
-    //         indices.push(corners[6]);
-    //
-    //         indices.push(corners[0]); // -z face, -x side
-    //         indices.push(corners[1]);
-    //         indices.push(corners[2]);
-    //
-    //         indices.push(corners[4]); // -z face, +x side
-    //         indices.push(corners[6]);
-    //         indices.push(corners[2]);
-    //
-    //         indices.push(corners[6]); // bottom +y face
-    //         indices.push(corners[2]);
-    //         indices.push(corners[3]);
-    //
-    //         indices.push(corners[6]); // top +y face
-    //         indices.push(corners[4]);
-    //         indices.push(corners[7]);
-    //
-    //         // TODO Finish adding vertices of the 16x16x16 set of cubes specified by the ID matrix
-    //         indices.push(corners[5]); // bottom +x face
-    //         indices.push(corners[4]);
-    //         indices.push(corners[1]);
-    //
-    //         indices.push(corners[5]); // bottom +x face
-    //         indices.push(corners[4]);
-    //         indices.push(corners[1]);
-    //
-    //         indices.push(corners[3]); // bottom -y face
-    //         indices.push(corners[1]);
-    //         indices.push(corners[0]);
-    //
-    //         indices.push(corners[3]); // top -y face
-    //         indices.push(corners[5]);
-    //         indices.push(corners[1]);
-    //
-    //         indices.push(corners[3]); // +x face, -x side
-    //         indices.push(corners[6]);
-    //         indices.push(corners[5]);
-    //
-    //         indices.push(corners[6]); // +x face, -x side
-    //         indices.push(corners[7]);
-    //         indices.push(corners[5]);
-    //
-    //         println!("cube {n}");
-    //         for ii in corners.iter() {
-    //             let v1 = vertices[(*ii * 3) as usize];
-    //             let v2 = vertices[((*ii * 3) + 1) as usize];
-    //             let v3 = vertices[((*ii * 3) + 2) as usize];
-    //             print!("({v1}, {v2}, {v3}) ");
-    //         }
-    //         println!();
-    //     }
-    // }
+    let vertex_count = 17usize.pow(3);
+    let mut vertices = Vec::<f32>::with_capacity(vertex_count * 3);
+    for n in 0..vertex_count {
+        let x = (n % 17) as f32;
+        let y = ((n / 17) % 17) as f32;
+        let z = (n / 289) as f32;
+        vertices.push(x);
+        vertices.push(y);
+        vertices.push(z);
+    }
+
+    let mut indices: Vec<RtIndex> = Vec::new();
+    for (m, id) in FULL_CUBE.iter().enumerate() {
+        if *id > 0 {
+    // let n = 0;
+            let n = m;
+            // let x = (n % 16) as RtIndex;
+            // let y = ((n / 16) % 16) as RtIndex;
+            // let z = ((n / 256) / 256) as RtIndex;
+            let v_idx = (n + n / 16 + (n / 256) * 17) as RtIndex;
+
+            // z is up I think
+            let corners: [RtIndex; 8] = [v_idx, // lowest xyz
+                (v_idx + 1), // (x+1)yz
+                (v_idx + 17), // x(y+1)z
+                (v_idx + 289), // xy(z + 1)
+                (v_idx + 1 + 17), // (x+1)(y+1)z
+                (v_idx + 1 + 289), // (x+1)y(z+1)
+                (v_idx + 17 + 289), // x(y+1)(z+1)
+                (v_idx + 1 + 17 + 289) // (x+1)(y+1)(z+1)
+            ];
+            indices.push(corners[0]); // bottom -x face
+            indices.push(corners[2]);
+            indices.push(corners[3]);
+
+            indices.push(corners[3]); // top -x face
+            indices.push(corners[2]);
+            indices.push(corners[6]);
+
+            indices.push(corners[0]); // -z face, -x side
+            indices.push(corners[1]);
+            indices.push(corners[2]);
+
+            indices.push(corners[4]); // -z face, +x side
+            indices.push(corners[6]);
+            indices.push(corners[2]);
+
+            indices.push(corners[6]); // bottom +y face
+            indices.push(corners[2]);
+            indices.push(corners[3]);
+
+            indices.push(corners[6]); // top +y face
+            indices.push(corners[4]);
+            indices.push(corners[7]);
+
+            // TODO Finish adding vertices of the 16x16x16 set of cubes specified by the ID matrix
+            indices.push(corners[5]); // bottom +x face
+            indices.push(corners[4]);
+            indices.push(corners[1]);
+
+            indices.push(corners[5]); // bottom +x face
+            indices.push(corners[4]);
+            indices.push(corners[1]);
+
+            indices.push(corners[3]); // bottom -y face
+            indices.push(corners[1]);
+            indices.push(corners[0]);
+
+            indices.push(corners[3]); // top -y face
+            indices.push(corners[5]);
+            indices.push(corners[1]);
+
+            indices.push(corners[3]); // +x face, -x side
+            indices.push(corners[6]);
+            indices.push(corners[5]);
+
+            indices.push(corners[6]); // +x face, -x side
+            indices.push(corners[7]);
+            indices.push(corners[5]);
+
+            // println!("cube {n}");
+            // for ii in corners.iter() {
+            //     let v1 = vertices[(*ii * 3) as usize];
+            //     let v2 = vertices[((*ii * 3) + 1) as usize];
+            //     let v3 = vertices[((*ii * 3) + 2) as usize];
+            //     print!("({v1}, {v2}, {v3}) ");
+            // }
+            // println!();
+        }
+    }
 
     let blas = RtAccel::new_blas_triangles(core, &acceleration_instance, command_pool, &indices,
                                            &vertices);
+    let mut instances: Vec<RtPerInstanceData> = Vec::new();
+    for n in 0..8000 {
+        instances.push(RtPerInstanceData {
+            blas_index: 0,
+            offset: Vector3::new(((n % 8) * 34) as f32, ((n / 8) * 34) as f32, 0.0)
+        });
+    }
     let tlas: Vec<RtTlas> = Vec::from(
         [
-            RtAccel::new_tlas(core, &acceleration_instance, command_pool, &[&blas]),
-            RtAccel::new_tlas(core, &acceleration_instance, command_pool, &[&blas])
+            RtAccel::new_tlas(core, &acceleration_instance, command_pool, &[&blas], instances.as_slice()),
+            RtAccel::new_tlas(core, &acceleration_instance, command_pool, &[&blas], instances.as_slice())
         ]);
 
     (acceleration_instance, tlas, blas)

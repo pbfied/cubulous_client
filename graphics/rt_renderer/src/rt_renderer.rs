@@ -233,8 +233,8 @@ impl RtRenderer {
                                               0.1, 10.0).inverse_transform().unwrap();
             perspective.y.y *= -1.0;
             [RtPerFrameUbo {
-                inverse_view: Matrix4::look_at_rh(Point3::new(3.0, 3.0, 3.0),
-                                                  Point3::new(0.0, 0.0, 0.0),
+                inverse_view: Matrix4::look_at_rh(Point3::new(-32.0, -32.0, 64.0),
+                                                  Point3::new(8.0, 8.0, 8.0),
                                                   Vector3::new(0.0, 0.0, 1.0)).inverse_transform().unwrap(),
                 inverse_proj: perspective
             }]
