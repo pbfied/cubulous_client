@@ -78,7 +78,8 @@ pub struct GpuBuffer {
 impl GpuBuffer {
     pub fn new(core: &VkCore,
                size: vk::DeviceSize,
-               usage: vk::BufferUsageFlags) -> GpuBuffer {
+               usage: vk::BufferUsageFlags,
+               memtype: vk::MemoryPropertyFlags) -> GpuBuffer {
         let buffer_create_info = vk::BufferCreateInfo::default()
             .size(size)
             .usage(usage)
@@ -88,7 +89,7 @@ impl GpuBuffer {
 
         let mem_reqs = unsafe { core.logical_device.get_buffer_memory_requirements(buffer) };
 
-        let idx = find_buf_index(core, vk::MemoryPropertyFlags::DEVICE_LOCAL, mem_reqs).unwrap();
+        let idx = find_buf_index(core, memtype, mem_reqs).unwrap();
 
         // Explicit flushes are required otherwise
         let alloc_info = vk::MemoryAllocateInfo::default()
@@ -104,13 +105,23 @@ impl GpuBuffer {
         }
     }
 
-    pub fn new_initialized<T>(core: &VkCore, cmd_pool: vk::CommandPool, dst_flags: vk::BufferUsageFlags,
-                              src_flags: vk::BufferUsageFlags, items: &[T]) -> GpuBuffer {
+    pub fn new_initialized<T>(core: &VkCore, cmd_pool: vk::CommandPool, usage_flags: vk::BufferUsageFlags, items: &[T],
+                              memtype: vk::MemoryPropertyFlags) -> GpuBuffer {
         let data_size: vk::DeviceSize = (mem::size_of::<T>() * items.len()) as vk::DeviceSize;
         let item_count = items.len();
 
-        let (host_mem, host_buf) = create_buffer(core, data_size, vk::BufferUsageFlags::TRANSFER_SRC | src_flags,
-                                  vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT);
+        let mut host_flags = vk::BufferUsageFlags::empty();
+        let mut host_mem_props = vk::MemoryPropertyFlags::empty();
+        if memtype == vk::MemoryPropertyFlags::DEVICE_LOCAL {
+            host_flags = vk::BufferUsageFlags::TRANSFER_SRC;
+            host_mem_props = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;
+        }
+        else {
+            host_flags = usage_flags;
+            host_mem_props = memtype;
+        }
+
+        let (host_mem, host_buf) = create_buffer(core, data_size, host_flags, host_mem_props);
 
         unsafe {
             let dev_memory = core.logical_device
@@ -120,19 +131,29 @@ impl GpuBuffer {
                             vk::MemoryMapFlags::empty())
                 .unwrap() as *mut T;
             dev_memory.copy_from_nonoverlapping(items.as_ptr(), item_count);
-            core.logical_device.unmap_memory(host_mem);
+            unsafe {
+                core.logical_device.unmap_memory(host_mem);
+            }
         }
 
-        let mut device_buf = GpuBuffer::new(core, data_size, dst_flags |
-            vk::BufferUsageFlags::TRANSFER_DST);
-        copy_buffer(core, cmd_pool, host_buf, device_buf.buf, data_size);
-        device_buf.item_count = item_count;
-        unsafe {
-            core.logical_device.destroy_buffer(host_buf, None);
-            core.logical_device.free_memory(host_mem, None);
-        }
+        if memtype == vk::MemoryPropertyFlags::DEVICE_LOCAL {
+            let mut device_buf = GpuBuffer::new(core, data_size, usage_flags |
+                vk::BufferUsageFlags::TRANSFER_DST, vk::MemoryPropertyFlags::DEVICE_LOCAL);
+            copy_buffer(core, cmd_pool, host_buf, device_buf.buf, data_size);
+            device_buf.item_count = item_count;
+            unsafe {
+                core.logical_device.destroy_buffer(host_buf, None);
+                core.logical_device.free_memory(host_mem, None);
+            }
 
-        device_buf
+            device_buf
+        } else {
+            GpuBuffer {
+                buf: host_buf,
+                mem: host_mem,
+                item_count,
+            }
+        }
     }
 
     pub fn destroy(&self, core: &VkCore) {

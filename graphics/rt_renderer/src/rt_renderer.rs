@@ -49,11 +49,11 @@ pub struct RtRenderer {
 impl RtRenderer {
     pub fn new(ev_loop: &EventLoop<()>) -> RtRenderer {
         let required_extensions: Vec<CString> = Vec::from([
-            CString::from(vk::KhrSwapchainFn::name()), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
-            CString::from(vk::KhrRayTracingPipelineFn::name()),
-            CString::from(vk::KhrAccelerationStructureFn::name()),
-            CString::from(vk::KhrDeferredHostOperationsFn::name()), // Required by VK_KHR_acceleration_structure
-            CString::from(vk::ExtBufferDeviceAddressFn::name())
+            CString::from(vk::KhrSwapchainFn::NAME), // Equivalent to the Vulkan VK_KHR_SWAPCHAIN_EXTENSION_NAME
+            CString::from(vk::KhrRayTracingPipelineFn::NAME),
+            CString::from(vk::KhrAccelerationStructureFn::NAME),
+            CString::from(vk::KhrDeferredHostOperationsFn::NAME), // Required by VK_KHR_acceleration_structure
+            CString::from(vk::ExtBufferDeviceAddressFn::NAME)
         ]);
         let required_layers: Vec<String> = Vec::from([String::from("VK_LAYER_KHRONOS_validation")]);
         let core = VkCore::new(ev_loop, &required_layers, &required_extensions);
@@ -233,7 +233,7 @@ impl RtRenderer {
                                               0.1, 10.0).inverse_transform().unwrap();
             perspective.y.y *= -1.0;
             [RtPerFrameUbo {
-                inverse_view: Matrix4::look_at_rh(Point3::new(2.0, 2.0, 2.0),
+                inverse_view: Matrix4::look_at_rh(Point3::new(3.0, 3.0, 3.0),
                                                   Point3::new(0.0, 0.0, 0.0),
                                                   Vector3::new(0.0, 0.0, 1.0)).inverse_transform().unwrap(),
                 inverse_proj: perspective

@@ -5,6 +5,9 @@ pub mod rt_canvas;
 pub mod rt_descriptor;
 pub mod rt_ubo;
 mod rt_frame;
+mod rt_object;
+mod rt_constants;
+mod rt_types;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

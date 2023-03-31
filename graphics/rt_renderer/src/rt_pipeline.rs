@@ -7,6 +7,7 @@ use ash::vk;
 use ash::extensions::khr;
 use ash::vk::Pipeline;
 use cgmath::Vector4;
+use vk::PhysicalDeviceRayTracingPipelineFeaturesKHR;
 use renderlib::gpu_buffer::{create_buffer, GpuBuffer};
 use renderlib::vkcore::VkCore;
 
@@ -141,7 +142,11 @@ impl RtPipeline {
                                                   &create_info, None).unwrap()
         };
 
-        let rt_properties = unsafe { khr::RayTracingPipeline::get_properties(&core.instance, core.physical_device) };
+        // let rt_properties = unsafe { khr::RayTracingPipeline::get_properties(&core.instance, core.physical_device) };
+        let mut rt_properties = vk::PhysicalDeviceRayTracingPipelinePropertiesKHR::default();
+        let mut dev_properties2 = vk::PhysicalDeviceProperties2::default()
+            .push_next(&mut rt_properties);
+        unsafe { core.instance.get_physical_device_properties2(core.physical_device, &mut dev_properties2) };
 
         // Note that each shader table group is made up of one handle for each shader within the group
         // Handles have alignment requirements

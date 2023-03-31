@@ -60,7 +60,7 @@ impl VkCore {
     pub fn new(ev_loop: &EventLoop<()>, required_layers: &Vec<String>, required_extensions: &Vec<CString>) -> VkCore {
         fn load_entry() -> Entry {
             let vk_lib_env = env::var("VK_LIB_PATH").unwrap();
-            let vk_lib_path = Path::new(&vk_lib_env).join("libvulkan.so");
+            let vk_lib_path = Path::new(&vk_lib_env);
 
             let entry_local: Entry;
             unsafe {
@@ -184,7 +184,7 @@ impl VkCore {
                     .application_name(application_name);
 
                 // Required for MacOs compatibility
-                winit_extensions.push(vk::KhrPortabilityEnumerationFn::name().as_ptr());
+                winit_extensions.push(vk::KhrPortabilityEnumerationFn::NAME.as_ptr());
                 let create_flags = vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
 
                 // Wrap previous stuff into a higher level struct

@@ -16,8 +16,8 @@ ash = { path = "../ash/ash", default-features = false, features = ["loaded", "de
 ash-window = { path = "../ash/ash-window" }
 renderlib = { path = "graphics/renderlib" }
 rt_renderer = { path= "graphics/rt_renderer" }
-cgmath = "0.18.0"
-winit = "0.28.2"
+cgmath = "0.18"
+winit = "0.28"
 
 [[example]]
 name = "raster_tutorial"
